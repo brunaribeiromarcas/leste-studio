@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Leste Studio | Universidade do Leste</title>
+    <meta
+      name="description"
+      content="Plataforma oficial da Universidade do Leste para gerar Manual da Instrutora, Slides e Apostila do Aluno."
+    />
+    <link rel="stylesheet" href="studio.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <a class="brand" href="#briefing" aria-label="Leste Studio">
+          <img src="assets/logo-universidade-do-leste.jpeg" alt="Logo da Universidade do Leste" />
+          <span>
+            <strong>Leste Studio</strong>
+            <small>Universidade do Leste</small>
+          </span>
+        </a>
+
+        <nav class="nav" aria-label="Navegação principal">
+          <a href="#briefing" class="is-active">Briefing</a>
+          <a href="#matriz">Matriz 4x2</a>
+          <a href="#materiais">Materiais</a>
+          <a href="#canva">Canva</a>
+        </nav>
+
+        <div class="ai-card" data-ai-card>
+          <span class="status-dot"></span>
+          <div>
+            <strong data-ai-title>Verificando IA</strong>
+            <small data-ai-subtitle>DeepSeek V4 Flash</small>
+          </div>
+          <button class="ai-test-button" type="button" data-action="test-ai">Testar</button>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Gerador de materiais pedagógicos</p>
+            <h1>Criação padronizada de cursos da Universidade do Leste</h1>
+          </div>
+          <div class="topbar-actions">
+            <button class="button button-ghost" type="button" data-action="save">Salvar</button>
+            <button class="button button-primary" type="button" data-action="generate-materials">Gerar materiais</button>
+          </div>
+        </header>
+
+        <section class="panel briefing-panel" id="briefing" aria-labelledby="briefing-title">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Briefing do curso</p>
+              <h2 id="briefing-title">Base pedagógica</h2>
+            </div>
+            <button class="button button-secondary" type="button" data-action="generate-matrix">Gerar matriz com IA</button>
+          </div>
+
+          <form class="briefing-grid" data-course-form>
+            <label class="field field-wide">
+              <span>Nome do curso</span>
+              <input data-course="title" type="text" autocomplete="off" />
+            </label>
+
+            <label class="field">
+              <span>Público principal</span>
+              <input data-course="audience" type="text" autocomplete="off" />
+            </label>
+
+            <label class="field">
+              <span>Carga horária</span>
+              <input data-course="duration" type="text" autocomplete="off" />
+            </label>
+
+            <label class="field">
+              <span>Modalidade</span>
+              <select data-course="modality">
+                <option>Presencial</option>
+                <option>Online ao vivo</option>
+                <option>Híbrido</option>
+                <option>Assíncrono</option>
+              </select>
+            </label>
+
+            <label class="field">
+              <span>Tom de voz</span>
+              <select data-course="tone">
+                <option>Acolhedor, profissional e institucional</option>
+                <option>Executivo, objetivo e inspirador</option>
+                <option>Didático, próximo e prático</option>
+              </select>
+            </label>
+
+            <label class="field field-wide">
+              <span>Objetivo do curso</span>
+              <textarea data-course="goal" rows="3"></textarea>
+            </label>
+
+            <label class="field">
+              <span>Contexto institucional</span>
+              <textarea data-course="context" rows="5"></textarea>
+            </label>
+
+            <label class="field">
+              <span>Conteúdos-base</span>
+              <textarea data-course="source" rows="5"></textarea>
+            </label>
+          </form>
+        </section>
+
+        <section class="panel" id="matriz" aria-labelledby="matrix-title">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Estrutura obrigatória</p>
+              <h2 id="matrix-title">Matriz 4 módulos x 2 aulas</h2>
+            </div>
+            <div class="inline-actions">
+              <button class="button button-ghost" type="button" data-action="fill-demo">Exemplo</button>
+              <button class="button button-secondary" type="button" data-action="generate-matrix">Gerar matriz</button>
+            </div>
+          </div>
+          <div class="matrix-grid" data-matrix></div>
+        </section>
+
+        <section class="panel" id="materiais" aria-labelledby="materials-title">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Produção educacional</p>
+              <h2 id="materials-title">Manual, Slides e Apostila</h2>
+            </div>
+            <div class="inline-actions">
+              <button class="button button-ghost" type="button" data-action="review-materials">Revisar com IA</button>
+              <button class="button button-primary" type="button" data-action="generate-materials">Gerar materiais</button>
+            </div>
+          </div>
+
+          <div class="tabs" role="tablist" aria-label="Materiais">
+            <button class="tab is-active" type="button" data-tab="manual">Manual da Instrutora</button>
+            <button class="tab" type="button" data-tab="slides">Slides</button>
+            <button class="tab" type="button" data-tab="workbook">Apostila do Aluno</button>
+            <button class="tab" type="button" data-tab="review">Revisão</button>
+          </div>
+
+          <div class="material-output" data-material-output></div>
+
+          <div class="export-row">
+            <button class="button button-secondary" type="button" data-action="download-html">Baixar HTML</button>
+            <button class="button button-secondary" type="button" data-action="download-txt">Baixar texto</button>
+            <button class="button button-ghost" type="button" data-action="download-json">Baixar JSON</button>
+            <button class="button button-ghost" type="button" data-action="print">Salvar em PDF</button>
+          </div>
+        </section>
+
+        <section class="panel canva-panel" id="canva" aria-labelledby="canva-title">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Canva</p>
+              <h2 id="canva-title">Preparação visual e institucional</h2>
+            </div>
+            <img src="assets/logo-universidade-do-leste.jpeg" alt="Logo da Universidade do Leste" />
+          </div>
+
+          <div class="canva-grid">
+            <article>
+              <strong>Paleta oficial</strong>
+              <div class="swatches" aria-label="Paleta oficial">
+                <span style="--color: #004a7c">#004A7C</span>
+                <span style="--color: #00385f">#00385F</span>
+                <span style="--color: #00679f">#00679F</span>
+                <span style="--color: #f4c21f">#F4C21F</span>
+                <span style="--color: #d9a600">#D9A600</span>
+              </div>
+            </article>
+
+            <article>
+              <strong>Guia rápido</strong>
+              <ul data-canva-guide>
+                <li>Use a logo no início, no encerramento e nos materiais exportados.</li>
+                <li>Reserve o dourado para chamadas, progresso e ações principais.</li>
+                <li>Mantenha fundos claros para apostilas e azul profundo para aberturas.</li>
+              </ul>
+            </article>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div class="toast" data-toast role="status" aria-live="polite"></div>
+    <script src="studio.js"></script>
+  </body>
+</html>

@@ -1,0 +1,9 @@
+{
+  "name": "leste-studio",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Leste Studio da Universidade do Leste para geração de materiais pedagógicos.",
+  "devDependencies": {
+    "@netlify/functions": "latest"
+  }
+}
