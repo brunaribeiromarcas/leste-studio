@@ -77,13 +77,25 @@ async function handleGenerate(req: Request) {
   }
 
   const task = String((body as { task?: unknown }).task || "");
+  const startedAt = Date.now();
+
+  if (task === "materials") {
+    return jsonResponse(200, {
+      ok: true,
+      model: config.model,
+      task,
+      usage: null,
+      elapsedMs: Date.now() - startedAt,
+      data: completeMaterials(body as Record<string, unknown>),
+    });
+  }
+
   const messages = buildMessages(task, body as Record<string, unknown>);
 
   if (!messages) {
     return jsonResponse(400, { ok: false, error: "Tarefa de geração inválida." });
   }
 
-  const startedAt = Date.now();
   const completion = await callDeepSeek(messages, config, task);
   const parsed = parseJsonContent(completion.content);
   const data = completeGeneratedData(task, parsed);
@@ -431,6 +443,128 @@ function completeMatrix(data: unknown) {
         }),
       };
     }),
+  };
+}
+
+function completeMaterials(payload: Record<string, unknown>) {
+  const course = asRecord(payload.course);
+  const matrix = completeMatrix(payload.matrix);
+  const courseTitle = stringValue(course.title, "Curso da Universidade do Leste");
+
+  const manual = [
+    {
+      title: "Abertura do curso",
+      kind: "abertura",
+      content: `Receba a turma com acolhimento, apresente o curso ${courseTitle} e conecte o tema aos desafios reais das participantes.`,
+      facilitationNotes: [
+        "Convide as participantes a compartilharem expectativas.",
+        "Explique que o percurso combina conceitos, exemplos, reflexões e aplicação prática.",
+      ],
+      transitionPhrases: ["Vamos começar criando uma base comum para a aprendizagem."],
+    },
+    ...matrix.modules.flatMap((moduleItem, moduleIndex) => [
+      {
+        title: `Introdução do módulo ${moduleIndex + 1}: ${moduleItem.title}`,
+        kind: "modulo",
+        content: `${moduleItem.introduction} Objetivo do módulo: ${moduleItem.objective}`,
+        facilitationNotes: ["Apresente o propósito do módulo antes de entrar nas aulas."],
+        transitionPhrases: ["Com o objetivo claro, vamos para a primeira aula."],
+      },
+      ...moduleItem.lessons.map((lessonItem, lessonIndex) => ({
+        title: `Aula ${moduleIndex + 1}.${lessonIndex + 1}: ${lessonItem.title}`,
+        kind: "aula",
+        content: `${lessonItem.opening} Desenvolva o tema com foco em ${lessonItem.objective} ${lessonItem.development}`,
+        facilitationNotes: [
+          `Exemplos sugeridos: ${lessonItem.examples.join("; ")}.`,
+          `Reflexão: ${lessonItem.reflection}`,
+          `Exercício: ${lessonItem.exercise}`,
+        ],
+        transitionPhrases: [lessonItem.transition, lessonItem.closing].filter(Boolean),
+      })),
+    ]),
+    {
+      title: "Encerramento do curso",
+      kind: "encerramento",
+      content:
+        "Retome os principais aprendizados, convide cada participante a registrar um compromisso de aplicação e encerre com a presença institucional da Universidade do Leste.",
+      facilitationNotes: ["Valorize a participação da turma e indique próximos passos."],
+      transitionPhrases: ["A Universidade do Leste agradece sua participação neste percurso de aprendizagem."],
+    },
+  ];
+
+  const slides = [
+    {
+      title: courseTitle,
+      kicker: "Universidade do Leste",
+      bullets: ["Boas-vindas", "Percurso 4 módulos", "Aprendizagem prática"],
+      speakerNotes: "Abra a apresentação com tom acolhedor e institucional.",
+    },
+    ...matrix.modules.flatMap((moduleItem, moduleIndex) => [
+      {
+        title: `Módulo ${moduleIndex + 1}`,
+        kicker: moduleItem.title,
+        bullets: [moduleItem.objective],
+        speakerNotes: moduleItem.introduction,
+      },
+      ...moduleItem.lessons.map((lessonItem) => ({
+        title: lessonItem.title,
+        kicker: "Aula",
+        bullets: [lessonItem.objective, lessonItem.reflection, lessonItem.exercise].filter(Boolean),
+        speakerNotes: lessonItem.development,
+      })),
+    ]),
+    {
+      title: "Universidade do Leste",
+      kicker: "Encerramento",
+      bullets: ["Conhecimento aplicado", "Próximos passos", "Compromisso com a prática"],
+      speakerNotes: "Finalize reforçando a presença institucional e o valor da continuidade.",
+    },
+  ];
+
+  const workbook = [
+    {
+      title: "Boas-vindas",
+      content: `Esta apostila acompanha o curso ${courseTitle} e foi preparada para apoiar sua participação ativa.`,
+      activity: "Registre sua principal expectativa para o curso.",
+      reflection: "Que resultado tornaria este curso valioso para você?",
+      notesPrompt: "Minhas expectativas:",
+    },
+    ...matrix.modules.flatMap((moduleItem, moduleIndex) => [
+      {
+        title: `Módulo ${moduleIndex + 1}: ${moduleItem.title}`,
+        content: `${moduleItem.introduction} Objetivo: ${moduleItem.objective}`,
+        activity: "Anote uma situação real relacionada a este módulo.",
+        reflection: "Qual conexão você faz com sua prática atual?",
+        notesPrompt: "Anotações do módulo:",
+      },
+      ...moduleItem.lessons.map((lessonItem) => ({
+        title: lessonItem.title,
+        content: lessonItem.development,
+        activity: lessonItem.exercise,
+        reflection: lessonItem.reflection,
+        notesPrompt: "Minhas anotações:",
+      })),
+    ]),
+    {
+      title: "Encerramento",
+      content: "A Universidade do Leste agradece sua participação e incentiva a aplicação contínua do aprendizado.",
+      activity: "Defina uma ação prática para executar nos próximos sete dias.",
+      reflection: "Que compromisso você assume com seu desenvolvimento?",
+      notesPrompt: "Meu plano de ação:",
+    },
+  ];
+
+  return {
+    manual,
+    slides,
+    workbook,
+    canva: {
+      templateGuidance: [
+        "Use a logo no início, no encerramento e nos materiais exportados.",
+        "Reserve o dourado para chamadas, progresso e ações principais.",
+        "Mantenha fundos claros para apostilas e azul profundo para aberturas.",
+      ],
+    },
   };
 }
 
