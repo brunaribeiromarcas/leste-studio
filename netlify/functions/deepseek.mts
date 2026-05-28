@@ -86,6 +86,7 @@ async function handleGenerate(req: Request) {
   const startedAt = Date.now();
   const completion = await callDeepSeek(messages, config, task);
   const parsed = parseJsonContent(completion.content);
+  const data = completeGeneratedData(task, parsed);
 
   return jsonResponse(200, {
     ok: true,
@@ -93,7 +94,7 @@ async function handleGenerate(req: Request) {
     task,
     usage: completion.usage || null,
     elapsedMs: Date.now() - startedAt,
-    data: parsed,
+    data,
   });
 }
 
@@ -208,15 +209,8 @@ function buildMessages(task: string, payload: Record<string, unknown>) {
                 introduction: "Texto de introdução do módulo",
                 lessons: [
                   {
-                    title: "Nome da aula",
-                    objective: "Objetivo da aula",
-                    development: "Desenvolvimento do tema",
-                    examples: ["Exemplo prático 1", "Exemplo prático 2"],
-                    reflection: "Pergunta reflexiva",
-                    exercise: "Exercício prático",
-                    opening: "Frase de abertura da aula",
-                    transition: "Frase de transição para o próximo bloco",
-                    closing: "Frase de encerramento da aula",
+                title: "Nome da aula",
+                objective: "Objetivo da aula",
                   },
                 ],
               },
@@ -355,9 +349,89 @@ async function callDeepSeek(messages: unknown[], config: DeepSeekConfig, task: s
 }
 
 function maxTokensForTask(task: string) {
-  if (task === "matrix") return 3600;
+  if (task === "matrix") return 1400;
   if (task === "review") return 2600;
   return 4200;
+}
+
+function completeGeneratedData(task: string, data: unknown) {
+  if (task === "matrix") return completeMatrix(data);
+  return data;
+}
+
+function completeMatrix(data: unknown) {
+  const source = asRecord(data);
+  const modules = Array.isArray(source.modules) ? source.modules.slice(0, 4) : [];
+
+  while (modules.length < 4) {
+    modules.push({});
+  }
+
+  return {
+    modules: modules.map((moduleItem, moduleIndex) => {
+      const moduleRecord = asRecord(moduleItem);
+      const lessons = Array.isArray(moduleRecord.lessons) ? moduleRecord.lessons.slice(0, 2) : [];
+
+      while (lessons.length < 2) {
+        lessons.push({});
+      }
+
+      const moduleTitle = stringValue(moduleRecord.title, `Módulo ${moduleIndex + 1}`);
+      const moduleObjective = stringValue(
+        moduleRecord.objective,
+        "Organizar conceitos e práticas essenciais para aplicação em contexto real.",
+      );
+
+      return {
+        title: moduleTitle,
+        objective: moduleObjective,
+        introduction: stringValue(
+          moduleRecord.introduction,
+          `Neste módulo, a turma conecta ${moduleTitle.toLowerCase()} à prática profissional.`,
+        ),
+        lessons: lessons.map((lessonItem, lessonIndex) => {
+          const lessonRecord = asRecord(lessonItem);
+          const lessonTitle = stringValue(lessonRecord.title, `Aula ${lessonIndex + 1}`);
+          const lessonObjective = stringValue(
+            lessonRecord.objective,
+            "Compreender o tema e transformar o aprendizado em uma ação prática.",
+          );
+
+          return {
+            title: lessonTitle,
+            objective: lessonObjective,
+            development: stringValue(
+              lessonRecord.development,
+              `Conduza a aula relacionando ${lessonTitle.toLowerCase()} com desafios reais das participantes.`,
+            ),
+            examples: Array.isArray(lessonRecord.examples) && lessonRecord.examples.length
+              ? lessonRecord.examples
+              : ["Situação comum da rotina profissional", "Aplicação prática em contexto institucional"],
+            reflection: stringValue(
+              lessonRecord.reflection,
+              "O que muda na sua prática quando este conceito é aplicado com intencionalidade?",
+            ),
+            exercise: stringValue(
+              lessonRecord.exercise,
+              "Registrar uma ação concreta para aplicar o aprendizado nos próximos dias.",
+            ),
+            opening: stringValue(
+              lessonRecord.opening,
+              "Vamos começar conectando este tema à experiência de vocês.",
+            ),
+            transition: stringValue(
+              lessonRecord.transition,
+              "Com essa base construída, podemos avançar para a próxima aplicação.",
+            ),
+            closing: stringValue(
+              lessonRecord.closing,
+              "Guarde a principal decisão desta aula e leve-a para a prática.",
+            ),
+          };
+        }),
+      };
+    }),
+  };
 }
 
 async function postCompletion(payload: unknown, config: DeepSeekConfig): Promise<CompletionResult> {
@@ -460,7 +534,7 @@ function getConfig(): DeepSeekConfig {
     apiKey: envValue("DEEPSEEK_API_KEY"),
     model: envValue("DEEPSEEK_MODEL") || "deepseek-v4-flash",
     baseUrl: (envValue("DEEPSEEK_BASE_URL") || "https://api.deepseek.com").replace(/\/+$/, ""),
-    timeoutMs: Math.min(Number(envValue("DEEPSEEK_TIMEOUT_MS") || 40000), 40000),
+    timeoutMs: Math.min(Number(envValue("DEEPSEEK_TIMEOUT_MS") || 24000), 24000),
   };
 }
 
