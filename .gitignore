@@ -2,4 +2,6 @@
 .env
 .netlify/
 *.log
-
+.npm-cache/
+*.zip
+public/index.github.html
