@@ -84,7 +84,7 @@ async function handleGenerate(req: Request) {
   }
 
   const startedAt = Date.now();
-  const completion = await callDeepSeek(messages, config);
+  const completion = await callDeepSeek(messages, config, task);
   const parsed = parseJsonContent(completion.content);
 
   return jsonResponse(200, {
@@ -226,6 +226,7 @@ function buildMessages(task: string, payload: Record<string, unknown>) {
             "Criar exatamente 4 módulos.",
             "Cada módulo deve ter exatamente 2 aulas.",
             "As aulas devem evoluir de fundamentos para aplicação prática.",
+            "Manter os textos objetivos, com 1 a 2 frases curtas por campo.",
           ],
         }),
       },
@@ -277,6 +278,7 @@ function buildMessages(task: string, payload: Record<string, unknown>) {
             "Os Slides devem ser visuais, objetivos e com pouco texto por slide.",
             "A Apostila deve conter boas-vindas, visão geral, resumos, exercícios, reflexões, atividades e espaços para anotações.",
             "Encerrar todos os materiais com menção institucional à Universidade do Leste.",
+            "Manter a primeira versão enxuta para evitar excesso de texto na exportação.",
           ],
         }),
       },
@@ -314,13 +316,13 @@ function buildMessages(task: string, payload: Record<string, unknown>) {
   return null;
 }
 
-async function callDeepSeek(messages: unknown[], config: DeepSeekConfig) {
+async function callDeepSeek(messages: unknown[], config: DeepSeekConfig, task: string) {
   const payload = {
     model: config.model,
     messages,
     thinking: { type: "disabled" },
     temperature: 0.45,
-    max_tokens: 8192,
+    max_tokens: maxTokensForTask(task),
     response_format: { type: "json_object" },
   };
 
@@ -350,6 +352,12 @@ async function callDeepSeek(messages: unknown[], config: DeepSeekConfig) {
     content,
     usage: result.data && result.data.usage,
   };
+}
+
+function maxTokensForTask(task: string) {
+  if (task === "matrix") return 2200;
+  if (task === "review") return 2600;
+  return 4200;
 }
 
 async function postCompletion(payload: unknown, config: DeepSeekConfig): Promise<CompletionResult> {
@@ -452,7 +460,7 @@ function getConfig(): DeepSeekConfig {
     apiKey: envValue("DEEPSEEK_API_KEY"),
     model: envValue("DEEPSEEK_MODEL") || "deepseek-v4-flash",
     baseUrl: (envValue("DEEPSEEK_BASE_URL") || "https://api.deepseek.com").replace(/\/+$/, ""),
-    timeoutMs: Number(envValue("DEEPSEEK_TIMEOUT_MS") || 45000),
+    timeoutMs: Math.min(Number(envValue("DEEPSEEK_TIMEOUT_MS") || 24000), 24000),
   };
 }
 
