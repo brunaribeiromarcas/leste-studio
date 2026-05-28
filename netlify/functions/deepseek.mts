@@ -355,7 +355,7 @@ async function callDeepSeek(messages: unknown[], config: DeepSeekConfig, task: s
 }
 
 function maxTokensForTask(task: string) {
-  if (task === "matrix") return 2200;
+  if (task === "matrix") return 3600;
   if (task === "review") return 2600;
   return 4200;
 }
@@ -460,7 +460,7 @@ function getConfig(): DeepSeekConfig {
     apiKey: envValue("DEEPSEEK_API_KEY"),
     model: envValue("DEEPSEEK_MODEL") || "deepseek-v4-flash",
     baseUrl: (envValue("DEEPSEEK_BASE_URL") || "https://api.deepseek.com").replace(/\/+$/, ""),
-    timeoutMs: Math.min(Number(envValue("DEEPSEEK_TIMEOUT_MS") || 24000), 24000),
+    timeoutMs: Math.min(Number(envValue("DEEPSEEK_TIMEOUT_MS") || 40000), 40000),
   };
 }
 
