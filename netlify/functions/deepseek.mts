@@ -449,11 +449,18 @@ async function testPublicInternet(config: DeepSeekConfig) {
 
 function getConfig(): DeepSeekConfig {
   return {
-    apiKey: Netlify.env.get("DEEPSEEK_API_KEY") || "",
-    model: Netlify.env.get("DEEPSEEK_MODEL") || "deepseek-v4-flash",
-    baseUrl: (Netlify.env.get("DEEPSEEK_BASE_URL") || "https://api.deepseek.com").replace(/\/+$/, ""),
-    timeoutMs: Number(Netlify.env.get("DEEPSEEK_TIMEOUT_MS") || 45000),
+    apiKey: envValue("DEEPSEEK_API_KEY"),
+    model: envValue("DEEPSEEK_MODEL") || "deepseek-v4-flash",
+    baseUrl: (envValue("DEEPSEEK_BASE_URL") || "https://api.deepseek.com").replace(/\/+$/, ""),
+    timeoutMs: Number(envValue("DEEPSEEK_TIMEOUT_MS") || 45000),
   };
+}
+
+function envValue(key: string) {
+  const netlifyEnv = typeof Netlify !== "undefined" && Netlify.env ? Netlify.env.get(key) : undefined;
+  const processEnv = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.[key];
+
+  return netlifyEnv || processEnv || "";
 }
 
 function fetchWithTimeout(url: string, options: RequestInit, timeoutMs: number) {
