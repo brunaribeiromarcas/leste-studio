@@ -1,61 +1,20 @@
 # Leste Studio
 
-App web local da Universidade do Leste para gerar Manual da Instrutora, Slides e Apostila do Aluno com apoio de IA.
+App web da Universidade do Leste para gerar Manual da Instrutora, Slides e Apostila do Aluno com apoio de IA.
 
-## Como rodar
+## Publicacao na Netlify
 
-Opção mais simples: abra `rodar-leste-studio.cmd`.
+A pasta publicada e `public`.
 
-Ou use o servidor local manualmente para proteger a chave da API:
+As funcoes serverless ficam em `netlify/functions` e expõem as rotas:
 
-```powershell
-node server.js
-```
+- `/api/health`
+- `/api/deepseek-test`
+- `/api/generate`
 
-Depois abra:
+## Variaveis de ambiente
 
-```text
-http://localhost:5177/
-```
-
-## IA
-
-A integração usa DeepSeek V4 Flash via endpoint seguro no servidor local. A chave fica em `.env`, que está ignorado pelo Git.
-Use `.env.example` como referência caso precise configurar outra máquina.
-
-Variáveis usadas:
-
-```text
-DEEPSEEK_API_KEY
-DEEPSEEK_MODEL
-DEEPSEEK_BASE_URL
-DEEPSEEK_TIMEOUT_MS
-PORT
-```
-
-## Teste da IA
-
-Depois de abrir o app, use o botão `Testar` no bloco da IA. Ele verifica a lista de modelos e faz uma geração mínima
-para identificar se o problema está na chave, saldo, modelo, limite de uso ou conexão com a DeepSeek.
-
-## Arquivos principais
-
-- `studio.html`: interface principal do Leste Studio.
-- `studio.css`: identidade visual institucional.
-- `studio.js`: fluxo do app, geração, revisão e exportação.
-- `server.js`: servidor local e ponte segura com a API DeepSeek.
-- `assets/logo-universidade-do-leste.jpeg`: logo oficial.
-
-## Observação
-
-O app mantém uma geração local de emergência caso a API esteja indisponível.
-
-## Publicação na Netlify
-
-A pasta publicada é `public`. A integração com a DeepSeek roda na Function `netlify/functions/deepseek.mts`,
-expondo as rotas `/api/health`, `/api/deepseek-test` e `/api/generate`.
-
-Configure estas variáveis no projeto Netlify:
+Configure estas variaveis no projeto Netlify:
 
 ```text
 DEEPSEEK_API_KEY
@@ -63,3 +22,16 @@ DEEPSEEK_MODEL=deepseek-v4-flash
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_TIMEOUT_MS=45000
 ```
+
+## Arquivos principais
+
+- `public/index.html`: interface principal do Leste Studio.
+- `public/studio.css`: identidade visual institucional.
+- `public/studio.js`: fluxo do app, geracao, revisao e exportacao.
+- `public/assets/logo-universidade-do-leste.jpeg`: logo oficial.
+- `netlify/functions/deepseek.mts`: ponte segura com a API da DeepSeek.
+- `netlify.toml`: configuracao de publicacao da Netlify.
+
+## Observacao
+
+O app mantem uma geracao local de emergencia caso a API esteja indisponivel.
