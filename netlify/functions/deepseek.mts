@@ -666,7 +666,7 @@ async function testPublicInternet(config: DeepSeekConfig) {
 function getConfig(): DeepSeekConfig {
   return {
     apiKey: envValue("DEEPSEEK_API_KEY"),
-    model: envValue("DEEPSEEK_MODEL") || "deepseek-v4-flash",
+    model: envValue("DEEPSEEK_MODEL") || "deepseek-v4-pro",
     baseUrl: (envValue("DEEPSEEK_BASE_URL") || "https://api.deepseek.com").replace(/\/+$/, ""),
     timeoutMs: Math.min(Number(envValue("DEEPSEEK_TIMEOUT_MS") || 24000), 24000),
   };
@@ -705,7 +705,7 @@ function getDeepSeekHint(error?: string, status?: number, network?: { ok: boolea
   }
 
   if (status === 404 || message.includes("model")) {
-    return "Verifique se a conta tem acesso ao modelo configurado: deepseek-v4-flash.";
+    return "Verifique se a conta tem acesso ao modelo configurado: deepseek-v4-pro.";
   }
 
   if (status === 429 || message.includes("rate limit")) {

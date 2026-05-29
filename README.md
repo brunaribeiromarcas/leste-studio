@@ -18,7 +18,7 @@ Configure estas variaveis no projeto Netlify:
 
 ```text
 DEEPSEEK_API_KEY
-DEEPSEEK_MODEL=deepseek-v4-flash
+DEEPSEEK_MODEL=deepseek-v4-pro
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_TIMEOUT_MS=45000
 ```

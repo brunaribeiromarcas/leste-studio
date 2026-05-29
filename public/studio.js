@@ -38,7 +38,7 @@
       ai: {
         configured: false,
         provider: "DeepSeek",
-        model: "deepseek-v4-flash",
+        model: "deepseek-v4-pro",
       },
     };
   }
@@ -145,7 +145,7 @@
       state.ai = {
         configured: Boolean(data.configured),
         provider: data.provider || "DeepSeek",
-        model: data.model || "deepseek-v4-flash",
+        model: data.model || "deepseek-v4-pro",
         baseUrl: data.baseUrl || "",
       };
       updateAiCard(data.configured ? "ready" : "offline");
@@ -182,7 +182,7 @@
         state.ai = {
           configured: true,
           provider: data.provider || "DeepSeek",
-          model: data.model || "deepseek-v4-flash",
+          model: data.model || "deepseek-v4-pro",
           baseUrl: data.baseUrl || "",
         };
         updateAiCard("ready");
@@ -380,7 +380,7 @@
         state.review = null;
         saveState();
         renderMaterials();
-        showToast("Materiais gerados com DeepSeek V4 Flash.");
+        showToast("Materiais gerados com DeepSeek V4 Pro.");
       } catch (error) {
         state.materials = makeLocalMaterials();
         saveState();
