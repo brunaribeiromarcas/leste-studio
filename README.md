@@ -30,7 +30,14 @@ DEEPSEEK_TIMEOUT_MS=45000
 - `public/studio.js`: fluxo do app, geracao, revisao e exportacao.
 - `public/assets/logo-universidade-do-leste.jpeg`: logo oficial.
 - `netlify/functions/deepseek.mts`: ponte segura com a API da DeepSeek.
+- `netlify/functions/export-document.mts`: geracao profissional de PDF e DOCX.
 - `netlify.toml`: configuracao de publicacao da Netlify.
+
+## Exportacao profissional
+
+O app gera PDF e DOCX no backend, a partir dos materiais estruturados do curso.
+O PDF usa layout A4 institucional com capa, cabecalho, rodape e numeracao.
+O DOCX e editavel no Word, com estilos, cabecalho, rodape e logo institucional.
 
 ## Observacao
 

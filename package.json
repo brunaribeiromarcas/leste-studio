@@ -2,7 +2,11 @@
   "name": "leste-studio",
   "version": "1.0.0",
   "private": true,
-  "description": "Leste Studio da Universidade do Leste para geração de materiais pedagógicos.",
+  "description": "Leste Studio da Universidade do Leste para geracao de materiais pedagogicos.",
+  "dependencies": {
+    "docx": "^9.5.1",
+    "pdf-lib": "^1.17.1"
+  },
   "devDependencies": {
     "@netlify/functions": "latest"
   }

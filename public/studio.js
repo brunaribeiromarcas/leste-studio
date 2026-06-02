@@ -131,6 +131,8 @@
       "download-json": downloadJson,
       "download-html": downloadHtml,
       "download-txt": downloadTxt,
+      "download-pdf": () => downloadProfessionalDocument("pdf", source),
+      "download-docx": () => downloadProfessionalDocument("docx", source),
       print: () => window.print(),
     };
 
@@ -675,6 +677,39 @@
     downloadFile("leste-studio-materiais.html", exportAsHtml(), "text/html;charset=utf-8");
   }
 
+  async function downloadProfessionalDocument(format, source) {
+    if (!state.materials) {
+      state.materials = makeLocalMaterials();
+      saveState();
+      renderMaterials();
+    }
+
+    await withLoading(source, async () => {
+      const response = await fetch("/api/export-document", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          format,
+          course: state.course,
+          matrix: state.matrix,
+          materials: state.materials,
+        }),
+      });
+
+      if (!response.ok) {
+        const result = await response.json().catch(() => null);
+        throw new Error((result && result.error) || "Nao foi possivel exportar o documento.");
+      }
+
+      const blob = await response.blob();
+      const filename = filenameFromResponse(response) || `leste-studio-materiais.${format}`;
+      downloadBlob(filename, blob);
+      showToast(format === "pdf" ? "PDF profissional gerado." : "DOCX editavel gerado.");
+    }).catch((error) => {
+      showToast(error.message || "Nao foi possivel exportar o documento.");
+    });
+  }
+
   function exportAsText() {
     const lines = [`LESTE STUDIO`, `Curso: ${state.course.title}`, ""];
     const materials = state.materials || makeLocalMaterials();
@@ -737,6 +772,10 @@
 
   function downloadFile(filename, content, type) {
     const blob = new Blob([content], { type });
+    downloadBlob(filename, blob);
+  }
+
+  function downloadBlob(filename, blob) {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
@@ -745,6 +784,13 @@
     link.click();
     link.remove();
     URL.revokeObjectURL(url);
+  }
+
+  function filenameFromResponse(response) {
+    const disposition = response.headers.get("Content-Disposition") || "";
+    const match = disposition.match(/filename="([^"]+)"/i) || disposition.match(/filename=([^;]+)/i);
+
+    return match ? match[1].trim() : "";
   }
 
   function setByPath(target, path, value) {
