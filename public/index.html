@@ -6,14 +6,14 @@
     <title>Leste Studio | Universidade do Leste</title>
     <meta
       name="description"
-      content="Plataforma oficial da Universidade do Leste para gerar Manual da Instrutora, Slides e Apostila do Aluno."
+      content="Plataforma oficial da Universidade do Leste para criar cursos do zero ou transformar materiais existentes em Manual da Instrutora, Slides, Apostila do Aluno e divulgação."
     />
     <link rel="stylesheet" href="studio.css" />
   </head>
   <body>
     <div class="app-shell">
       <aside class="sidebar">
-        <a class="brand" href="#briefing" aria-label="Leste Studio">
+        <a class="brand" href="#inicio" aria-label="Leste Studio">
           <img src="assets/logo-universidade-do-leste.jpeg" alt="Logo da Universidade do Leste" />
           <span>
             <strong>Leste Studio</strong>
@@ -22,7 +22,8 @@
         </a>
 
         <nav class="nav" aria-label="Navegação principal">
-          <a href="#briefing" class="is-active">Briefing</a>
+          <a href="#inicio" class="is-active">Início</a>
+          <a href="#briefing">Briefing</a>
           <a href="#matriz">Matriz 4x2</a>
           <a href="#materiais">Materiais</a>
           <a href="#canva">Canva</a>
@@ -42,13 +43,70 @@
         <header class="topbar">
           <div>
             <p class="eyebrow">Gerador de materiais pedagógicos</p>
-            <h1>Criação padronizada de cursos da Universidade do Leste</h1>
+            <h1>Crie cursos completos ou transforme materiais existentes no padrão da Universidade do Leste</h1>
           </div>
           <div class="topbar-actions">
             <button class="button button-ghost" type="button" data-action="save">Salvar</button>
-            <button class="button button-primary" type="button" data-action="generate-materials">Gerar materiais</button>
+            <button class="button button-primary" type="button" data-action="generate-materials">Gerar pacote completo</button>
           </div>
         </header>
+
+        <section class="panel start-panel" id="inicio" aria-labelledby="start-title">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Modo de criação</p>
+              <h2 id="start-title">Como você quer começar?</h2>
+            </div>
+            <img src="assets/logo-universidade-do-leste.jpeg" alt="Logo da Universidade do Leste" />
+          </div>
+
+          <div class="mode-switch" role="radiogroup" aria-label="Modo principal do Leste Studio">
+            <button class="mode-card is-active" type="button" data-mode-choice="scratch" role="radio" aria-checked="true">
+              <span>Criar curso do zero</span>
+              <strong>Gerar uma estrutura completa a partir do briefing.</strong>
+              <small>Ideal quando você ainda não tem material pronto. O sistema cria a matriz 4x2 e os materiais com profundidade pedagógica.</small>
+            </button>
+            <button class="mode-card" type="button" data-mode-choice="transform" role="radio" aria-checked="false">
+              <span>Transformar material existente</span>
+              <strong>Preservar, organizar e melhorar um conteúdo já criado.</strong>
+              <small>Envie PDF, DOCX, PPTX ou cole o texto para gerar os materiais faltantes no padrão institucional.</small>
+            </button>
+          </div>
+
+          <div class="source-panel" data-source-panel hidden>
+            <div class="source-grid">
+              <label class="upload-box">
+                <input
+                  type="file"
+                  data-source-file
+                  accept=".pdf,.docx,.pptx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                />
+                <span>Enviar material existente</span>
+                <strong data-source-file-name>PDF, DOCX ou PPTX</strong>
+                <small>O app extrai o texto, interpreta a estrutura e usa o conteúdo como base principal.</small>
+              </label>
+
+              <label class="field pasted-source">
+                <span>Ou cole o conteúdo aqui</span>
+                <textarea
+                  data-course="pastedSource"
+                  rows="8"
+                  placeholder="Cole roteiro, apostila, ementa, slides, transcrição, resumo ou qualquer material-base."
+                ></textarea>
+              </label>
+            </div>
+
+            <div class="source-actions">
+              <button class="button button-secondary" type="button" data-action="extract-file">Extrair arquivo</button>
+              <button class="button button-ghost" type="button" data-action="clear-source">Limpar material</button>
+            </div>
+
+            <div class="source-summary" data-source-summary>
+              <strong>Nenhum material extraído ainda.</strong>
+              <p>Ao enviar ou colar conteúdo, o Leste Studio preserva a base original e melhora estrutura, clareza, atividades e linguagem.</p>
+            </div>
+          </div>
+        </section>
 
         <section class="panel briefing-panel" id="briefing" aria-labelledby="briefing-title">
           <div class="panel-heading">
@@ -105,7 +163,7 @@
             </label>
 
             <label class="field">
-              <span>Conteúdos-base</span>
+              <span>Conteúdos-base ou observações</span>
               <textarea data-course="source" rows="5"></textarea>
             </label>
           </form>
@@ -129,11 +187,11 @@
           <div class="panel-heading">
             <div>
               <p class="eyebrow">Produção educacional</p>
-              <h2 id="materials-title">Manual, Slides e Apostila</h2>
+              <h2 id="materials-title">Manual, Slides, Apostila e Divulgação</h2>
             </div>
             <div class="inline-actions">
               <button class="button button-ghost" type="button" data-action="review-materials">Revisar com IA</button>
-              <button class="button button-primary" type="button" data-action="generate-materials">Gerar materiais</button>
+              <button class="button button-primary" type="button" data-action="generate-materials">Gerar pacote completo</button>
             </div>
           </div>
 
@@ -141,6 +199,7 @@
             <button class="tab is-active" type="button" data-tab="manual">Manual da Instrutora</button>
             <button class="tab" type="button" data-tab="slides">Slides</button>
             <button class="tab" type="button" data-tab="workbook">Apostila do Aluno</button>
+            <button class="tab" type="button" data-tab="marketing">Divulgação</button>
             <button class="tab" type="button" data-tab="review">Revisão</button>
           </div>
 

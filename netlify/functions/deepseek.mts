@@ -27,6 +27,25 @@ type CompletionResult = {
   };
 };
 
+type Matrix = {
+  modules: Array<{
+    title: string;
+    objective: string;
+    introduction: string;
+    lessons: Array<{
+      title: string;
+      objective: string;
+      development: string;
+      examples: string[];
+      reflection: string;
+      exercise: string;
+      opening: string;
+      transition: string;
+      closing: string;
+    }>;
+  }>;
+};
+
 export default async (req: Request, context: Context) => {
   try {
     const url = new URL(req.url);
@@ -78,18 +97,6 @@ async function handleGenerate(req: Request) {
 
   const task = String((body as { task?: unknown }).task || "");
   const startedAt = Date.now();
-
-  if (task === "materials") {
-    return jsonResponse(200, {
-      ok: true,
-      model: config.model,
-      task,
-      usage: null,
-      elapsedMs: Date.now() - startedAt,
-      data: completeMaterials(body as Record<string, unknown>),
-    });
-  }
-
   const messages = buildMessages(task, body as Record<string, unknown>);
 
   if (!messages) {
@@ -98,7 +105,7 @@ async function handleGenerate(req: Request) {
 
   const completion = await callDeepSeek(messages, config, task);
   const parsed = parseJsonContent(completion.content);
-  const data = completeGeneratedData(task, parsed);
+  const data = completeGeneratedData(task, parsed, body as Record<string, unknown>);
 
   return jsonResponse(200, {
     ok: true,
@@ -139,7 +146,7 @@ async function handleDeepSeekTest() {
       model: config.model,
       messages: [
         { role: "system", content: "Responda somente JSON válido." },
-        { role: "user", content: 'Retorne {"ok":true,"mensagem":"DeepSeek conectado"}' },
+        { role: "user", content: "{\"ok\":true,\"mensagem\":\"DeepSeek conectado\"}" },
       ],
       thinking: { type: "disabled" },
       temperature: 0,
@@ -176,10 +183,13 @@ async function handleDeepSeekTest() {
 
 function buildMessages(task: string, payload: Record<string, unknown>) {
   const course = asRecord(payload.course);
-  const matrix = asRecord(payload.matrix);
+  const matrix = completeMatrix(payload.matrix);
   const materials = asRecord(payload.materials);
+  const source = normalizeSourceMaterial(payload.sourceMaterial);
+  const mode = source.hasContent ? "transformar material existente" : "criar curso do zero";
 
   const baseContext = {
+    modo: mode,
     nomeDoCurso: stringValue(course.title, "Curso sem título"),
     publico: stringValue(course.audience),
     objetivo: stringValue(course.goal),
@@ -188,6 +198,15 @@ function buildMessages(task: string, payload: Record<string, unknown>) {
     tom: stringValue(course.tone, "acolhedor, profissional, claro e institucional"),
     contexto: stringValue(course.context),
     conteudosBase: stringValue(course.source),
+    materialExistente: source.hasContent
+      ? {
+          arquivo: source.fileName,
+          tipo: source.fileType,
+          resumo: source.summary,
+          analise: source.analysis,
+          texto: source.text,
+        }
+      : null,
     marca: {
       nome: "Universidade do Leste",
       produto: "Leste Studio",
@@ -200,9 +219,12 @@ function buildMessages(task: string, payload: Record<string, unknown>) {
   const system = [
     "Você é o motor pedagógico do Leste Studio, plataforma oficial da Universidade do Leste.",
     "Gere materiais em Português do Brasil, com acentuação correta, linguagem natural, tom acolhedor e padrão institucional.",
-    "Use princípios de design instrucional para adultos, clareza didática, progressão por objetivos, exemplos práticos e atividades aplicáveis.",
+    "Use design instrucional para adultos, clareza didática, progressão por objetivos, exemplos práticos e atividades aplicáveis.",
     "Responda exclusivamente com JSON válido, sem markdown, sem comentários fora do JSON e sem texto antes ou depois.",
     "Não invente promessas comerciais, certificações, leis, dados ou nomes de pessoas. Quando faltar informação, use formulações neutras e editáveis.",
+    source.hasContent
+      ? "Como há material existente, preserve a intenção, conceitos, exemplos e atividades originais sempre que forem úteis; melhore estrutura, clareza e completude sem apagar a essência do conteúdo recebido."
+      : "Como não há material existente, crie o curso do zero com profundidade pedagógica, estrutura 4x2 completa e exemplos plausíveis, sem fingir que existe uma fonte anterior.",
   ].join(" ");
 
   if (task === "matrix") {
@@ -211,7 +233,9 @@ function buildMessages(task: string, payload: Record<string, unknown>) {
       {
         role: "user",
         content: JSON.stringify({
-          tarefa: "Criar a matriz pedagógica completa do curso.",
+          tarefa: source.hasContent
+            ? "Interpretar o material existente e convertê-lo em matriz pedagógica 4x2."
+            : "Criar a matriz pedagógica completa do curso do zero.",
           contexto: baseContext,
           formatoObrigatorio: {
             modules: [
@@ -221,8 +245,15 @@ function buildMessages(task: string, payload: Record<string, unknown>) {
                 introduction: "Texto de introdução do módulo",
                 lessons: [
                   {
-                title: "Nome da aula",
-                objective: "Objetivo da aula",
+                    title: "Nome da aula",
+                    objective: "Objetivo da aula",
+                    development: "Desenvolvimento do tema",
+                    examples: ["Exemplo prático"],
+                    reflection: "Pergunta de reflexão",
+                    exercise: "Exercício prático",
+                    opening: "Frase de abertura",
+                    transition: "Frase de transição",
+                    closing: "Frase de encerramento",
                   },
                 ],
               },
@@ -232,7 +263,10 @@ function buildMessages(task: string, payload: Record<string, unknown>) {
             "Criar exatamente 4 módulos.",
             "Cada módulo deve ter exatamente 2 aulas.",
             "As aulas devem evoluir de fundamentos para aplicação prática.",
-            "Manter os textos objetivos, com 1 a 2 frases curtas por campo.",
+            source.hasContent
+              ? "Reorganizar o material recebido sem descaracterizar o conteúdo original."
+              : "Criar um percurso completo a partir dos dados informados.",
+            "Manter textos claros, objetivos e úteis para geração de Manual, Slides, Apostila e Divulgação.",
           ],
         }),
       },
@@ -245,7 +279,9 @@ function buildMessages(task: string, payload: Record<string, unknown>) {
       {
         role: "user",
         content: JSON.stringify({
-          tarefa: "Gerar Manual da Instrutora, Slides e Apostila do Aluno a partir da matriz.",
+          tarefa: source.hasContent
+            ? "Gerar os materiais faltantes a partir do material existente, preservando e melhorando a base original."
+            : "Gerar Manual da Instrutora, Slides, Apostila do Aluno e materiais de divulgação do zero.",
           contexto: baseContext,
           matriz: matrix,
           formatoObrigatorio: {
@@ -275,6 +311,14 @@ function buildMessages(task: string, payload: Record<string, unknown>) {
                 notesPrompt: "Espaço para anotações",
               },
             ],
+            marketing: [
+              {
+                title: "Nome da peça ou bloco",
+                content: "Texto de divulgação",
+                channels: ["Canal recomendado"],
+                assets: ["Peça sugerida"],
+              },
+            ],
             canva: {
               templateGuidance: ["Orientação para montar os materiais no Canva"],
             },
@@ -283,8 +327,11 @@ function buildMessages(task: string, payload: Record<string, unknown>) {
             "O Manual deve orientar abertura, condução, desenvolvimento, exemplos, reflexões, exercícios, transições e encerramento.",
             "Os Slides devem ser visuais, objetivos e com pouco texto por slide.",
             "A Apostila deve conter boas-vindas, visão geral, resumos, exercícios, reflexões, atividades e espaços para anotações.",
+            "Os materiais de divulgação devem incluir chamada curta, descrição do curso, benefícios e sugestões de peças/canais.",
             "Encerrar todos os materiais com menção institucional à Universidade do Leste.",
-            "Manter a primeira versão enxuta para evitar excesso de texto na exportação.",
+            source.hasContent
+              ? "Citar e preservar conceitos do material recebido, completando lacunas pedagógicas."
+              : "Criar conteúdo completo e coerente, sem depender de material prévio.",
           ],
         }),
       },
@@ -312,7 +359,10 @@ function buildMessages(task: string, payload: Record<string, unknown>) {
           regras: [
             "Corrigir ortografia, gramática, acentuação e naturalidade em pt-BR.",
             "Melhorar clareza, consistência pedagógica e tom institucional.",
-            "Não remover a estrutura 4x2 nem a menção institucional final.",
+            "Não remover a estrutura 4x2, os materiais de divulgação nem a menção institucional final.",
+            source.hasContent
+              ? "Conferir se a essência do material original foi preservada."
+              : "Conferir se o curso criado do zero tem profundidade suficiente.",
           ],
         }),
       },
@@ -327,7 +377,7 @@ async function callDeepSeek(messages: unknown[], config: DeepSeekConfig, task: s
     model: config.model,
     messages,
     thinking: { type: "disabled" },
-    temperature: 0.45,
+    temperature: task === "review" ? 0.25 : 0.45,
     max_tokens: maxTokensForTask(task),
     response_format: { type: "json_object" },
   };
@@ -361,17 +411,34 @@ async function callDeepSeek(messages: unknown[], config: DeepSeekConfig, task: s
 }
 
 function maxTokensForTask(task: string) {
-  if (task === "matrix") return 1400;
-  if (task === "review") return 2600;
-  return 4200;
+  if (task === "matrix") return 2600;
+  if (task === "review") return 4200;
+  return 7200;
 }
 
-function completeGeneratedData(task: string, data: unknown) {
+function completeGeneratedData(task: string, data: unknown, payload: Record<string, unknown>) {
   if (task === "matrix") return completeMatrix(data);
+  if (task === "materials") return completeMaterialsFromData(data, payload);
+  if (task === "review") return completeReviewData(data, payload);
   return data;
 }
 
-function completeMatrix(data: unknown) {
+function completeReviewData(data: unknown, payload: Record<string, unknown>) {
+  const record = asRecord(data);
+  const fallbackMaterials = completeMaterialsFromData(record.materials || payload.materials || {}, payload);
+
+  return {
+    review: asRecord(record.review || {
+      score: "em análise",
+      strengths: ["Materiais revisados em estrutura institucional."],
+      improvements: ["Padronização pedagógica aplicada."],
+      risks: [],
+    }),
+    materials: record.materials ? completeMaterialsFromData(record.materials, payload) : fallbackMaterials,
+  };
+}
+
+function completeMatrix(data: unknown): Matrix {
   const source = asRecord(data);
   const modules = Array.isArray(source.modules) ? source.modules.slice(0, 4) : [];
 
@@ -416,9 +483,10 @@ function completeMatrix(data: unknown) {
               lessonRecord.development,
               `Conduza a aula relacionando ${lessonTitle.toLowerCase()} com desafios reais das participantes.`,
             ),
-            examples: Array.isArray(lessonRecord.examples) && lessonRecord.examples.length
-              ? lessonRecord.examples
-              : ["Situação comum da rotina profissional", "Aplicação prática em contexto institucional"],
+            examples:
+              Array.isArray(lessonRecord.examples) && lessonRecord.examples.length
+                ? lessonRecord.examples.map(String)
+                : ["Situação comum da rotina profissional", "Aplicação prática em contexto institucional"],
             reflection: stringValue(
               lessonRecord.reflection,
               "O que muda na sua prática quando este conceito é aplicado com intencionalidade?",
@@ -427,10 +495,7 @@ function completeMatrix(data: unknown) {
               lessonRecord.exercise,
               "Registrar uma ação concreta para aplicar o aprendizado nos próximos dias.",
             ),
-            opening: stringValue(
-              lessonRecord.opening,
-              "Vamos começar conectando este tema à experiência de vocês.",
-            ),
+            opening: stringValue(lessonRecord.opening, "Vamos começar conectando este tema à experiência de vocês."),
             transition: stringValue(
               lessonRecord.transition,
               "Com essa base construída, podemos avançar para a próxima aplicação.",
@@ -446,16 +511,36 @@ function completeMatrix(data: unknown) {
   };
 }
 
+function completeMaterialsFromData(data: unknown, payload: Record<string, unknown>) {
+  const generated = asRecord(data);
+  const fallback = completeMaterials(payload);
+
+  return {
+    manual: normalizeItems(generated.manual, fallback.manual),
+    slides: normalizeItems(generated.slides, fallback.slides),
+    workbook: normalizeItems(generated.workbook, fallback.workbook),
+    marketing: normalizeItems(generated.marketing, fallback.marketing),
+    canva: {
+      templateGuidance: normalizeStringArray(
+        asRecord(generated.canva).templateGuidance,
+        fallback.canva.templateGuidance,
+      ),
+    },
+  };
+}
+
 function completeMaterials(payload: Record<string, unknown>) {
   const course = asRecord(payload.course);
+  const source = normalizeSourceMaterial(payload.sourceMaterial);
   const matrix = completeMatrix(payload.matrix);
   const courseTitle = stringValue(course.title, "Curso da Universidade do Leste");
+  const sourceMode = source.hasContent ? "com base no material existente" : "a partir do briefing inicial";
 
   const manual = [
     {
       title: "Abertura do curso",
       kind: "abertura",
-      content: `Receba a turma com acolhimento, apresente o curso ${courseTitle} e conecte o tema aos desafios reais das participantes.`,
+      content: `Receba a turma com acolhimento, apresente o curso ${courseTitle} e explique que o percurso foi estruturado ${sourceMode}.`,
       facilitationNotes: [
         "Convide as participantes a compartilharem expectativas.",
         "Explique que o percurso combina conceitos, exemplos, reflexões e aplicação prática.",
@@ -496,7 +581,7 @@ function completeMaterials(payload: Record<string, unknown>) {
     {
       title: courseTitle,
       kicker: "Universidade do Leste",
-      bullets: ["Boas-vindas", "Percurso 4 módulos", "Aprendizagem prática"],
+      bullets: ["Boas-vindas", "Percurso 4 módulos", source.hasContent ? "Material original aprimorado" : "Aprendizagem prática"],
       speakerNotes: "Abra a apresentação com tom acolhedor e institucional.",
     },
     ...matrix.modules.flatMap((moduleItem, moduleIndex) => [
@@ -554,15 +639,32 @@ function completeMaterials(payload: Record<string, unknown>) {
     },
   ];
 
+  const marketing = [
+    {
+      title: "Descrição curta do curso",
+      content: `${courseTitle} é um curso da Universidade do Leste criado para apoiar aprendizagem prática, clareza de ação e desenvolvimento institucional.`,
+      channels: ["Página do curso", "WhatsApp", "Instagram", "E-mail"],
+      assets: ["Chamada curta", "Descrição institucional", "Benefícios", "Convite para inscrição"],
+    },
+    {
+      title: "Chamada principal",
+      content: `Aprenda, pratique e avance com o curso ${courseTitle}, uma experiência da Universidade do Leste.`,
+      channels: ["Card de divulgação", "Mensagem curta"],
+      assets: ["Título", "Subtítulo", "Chamada para ação"],
+    },
+  ];
+
   return {
     manual,
     slides,
     workbook,
+    marketing,
     canva: {
       templateGuidance: [
         "Use a logo no início, no encerramento e nos materiais exportados.",
         "Reserve o dourado para chamadas, progresso e ações principais.",
         "Mantenha fundos claros para apostilas e azul profundo para aberturas.",
+        "Crie peças de divulgação com benefício claro e presença institucional da Universidade do Leste.",
       ],
     },
   };
@@ -625,9 +727,10 @@ async function getDeepSeekModels(config: DeepSeekConfig) {
       };
     }
 
-    const records = data && typeof data === "object" && Array.isArray((data as { data?: unknown }).data)
-      ? ((data as { data: Array<{ id?: string }> }).data)
-      : [];
+    const records =
+      data && typeof data === "object" && Array.isArray((data as { data?: unknown }).data)
+        ? (data as { data: Array<{ id?: string }> }).data
+        : [];
     const models = records.map((model) => model.id).filter(Boolean);
 
     return {
@@ -747,12 +850,34 @@ function deepSeekError(data: unknown) {
   return error && (error.message || error.type) ? error.message || error.type : null;
 }
 
+function normalizeSourceMaterial(value: unknown) {
+  const source = asRecord(value);
+  const text = stringValue(source.text).slice(0, 36000);
+
+  return {
+    hasContent: Boolean(source.hasContent || text),
+    fileName: stringValue(source.fileName, "Material existente"),
+    fileType: stringValue(source.fileType, "texto"),
+    summary: stringValue(source.summary),
+    analysis: asRecord(source.analysis),
+    text,
+  };
+}
+
+function normalizeItems(value: unknown, fallback: Array<Record<string, unknown>>) {
+  return Array.isArray(value) && value.length ? value.map((item) => asRecord(item)) : fallback;
+}
+
+function normalizeStringArray(value: unknown, fallback: string[]) {
+  return Array.isArray(value) && value.length ? value.map(String).filter(Boolean) : fallback;
+}
+
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
 }
 
 function stringValue(value: unknown, fallback = "") {
-  return typeof value === "string" && value.trim() ? value : fallback;
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
 }
 
 function jsonResponse(status: number, data: unknown) {

@@ -1,16 +1,19 @@
 (function () {
-  const STORAGE_KEY = "leste-studio-ai-v1";
+  const STORAGE_KEY = "leste-studio-ai-v2";
+  const SOURCE_LIMIT = 36000;
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
 
   const state = loadState();
   let toastTimer = null;
+  let selectedSourceFile = null;
 
   init();
 
   function init() {
     bindEvents();
     renderCourse();
+    renderMode();
     renderMatrix();
     renderMaterials();
     checkAiHealth();
@@ -18,6 +21,7 @@
 
   function defaultState() {
     return {
+      mode: "scratch",
       activeTab: "manual",
       course: {
         title: "Gestão Estratégica para Mulheres Empreendedoras",
@@ -31,7 +35,9 @@
           "Curso da Universidade do Leste, com foco em formação executiva feminina, aplicação prática, clareza pedagógica e identidade institucional.",
         source:
           "Planejamento, posicionamento, liderança, finanças, indicadores, comunicação, tomada de decisão e plano de ação.",
+        pastedSource: "",
       },
+      sourceMaterial: null,
       matrix: createEmptyMatrix(),
       materials: null,
       review: null,
@@ -66,7 +72,7 @@
 
   function loadState() {
     try {
-      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
+      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || localStorage.getItem("leste-studio-ai-v1"));
       return saved ? mergeState(defaultState(), saved) : defaultState();
     } catch {
       return defaultState();
@@ -77,8 +83,11 @@
     return {
       ...base,
       ...saved,
+      mode: saved.mode === "transform" ? "transform" : "scratch",
       course: { ...base.course, ...(saved.course || {}) },
+      sourceMaterial: saved.sourceMaterial || null,
       matrix: normalizeMatrix(saved.matrix || base.matrix),
+      materials: saved.materials ? normalizeMaterials(saved.materials) : null,
       ai: { ...base.ai, ...(saved.ai || {}) },
     };
   }
@@ -92,6 +101,11 @@
     document.addEventListener("click", (event) => {
       const actionButton = event.target.closest("[data-action]");
       const tabButton = event.target.closest("[data-tab]");
+      const modeButton = event.target.closest("[data-mode-choice]");
+
+      if (modeButton) {
+        setMode(modeButton.dataset.modeChoice);
+      }
 
       if (actionButton) {
         handleAction(actionButton.dataset.action, actionButton);
@@ -110,6 +124,11 @@
 
       if (courseField) {
         state.course[courseField.dataset.course] = courseField.value;
+        if (courseField.dataset.course === "pastedSource" && courseField.value.trim()) {
+          state.mode = "transform";
+          state.sourceMaterial = makePastedSourceMaterial(courseField.value);
+          renderMode();
+        }
         saveState();
       }
 
@@ -118,6 +137,15 @@
         saveState();
       }
     });
+
+    const sourceInput = $("[data-source-file]");
+    if (sourceInput) {
+      sourceInput.addEventListener("change", () => {
+        selectedSourceFile = sourceInput.files && sourceInput.files[0] ? sourceInput.files[0] : null;
+        const label = $("[data-source-file-name]");
+        if (label) label.textContent = selectedSourceFile ? selectedSourceFile.name : "PDF, DOCX ou PPTX";
+      });
+    }
   }
 
   async function handleAction(action, source) {
@@ -128,6 +156,8 @@
       "generate-materials": () => generateMaterials(source),
       "review-materials": () => reviewMaterials(source),
       "test-ai": () => testAi(source),
+      "extract-file": () => extractSource(source),
+      "clear-source": clearSource,
       "download-json": downloadJson,
       "download-html": downloadHtml,
       "download-txt": downloadTxt,
@@ -162,6 +192,7 @@
     const title = $("[data-ai-title]");
     const subtitle = $("[data-ai-subtitle]");
 
+    if (!card || !title || !subtitle) return;
     card.classList.toggle("is-ready", status === "ready");
     card.classList.toggle("is-offline", status === "offline");
     title.textContent = status === "ready" ? "IA ativa" : "IA indisponível";
@@ -197,15 +228,65 @@
     });
   }
 
+  function setMode(mode) {
+    state.mode = mode === "transform" ? "transform" : "scratch";
+    if (state.mode === "scratch" && !getSourceText()) {
+      state.sourceMaterial = null;
+    }
+    saveState();
+    renderMode();
+  }
+
   function renderCourse() {
     $$("[data-course]").forEach((field) => {
       field.value = state.course[field.dataset.course] || "";
     });
   }
 
+  function renderMode() {
+    $$("[data-mode-choice]").forEach((button) => {
+      const isActive = button.dataset.modeChoice === state.mode;
+      button.classList.toggle("is-active", isActive);
+      button.setAttribute("aria-checked", String(isActive));
+    });
+
+    const panel = $("[data-source-panel]");
+    if (panel) panel.hidden = state.mode !== "transform";
+    renderSourceSummary();
+  }
+
+  function renderSourceSummary() {
+    const summary = $("[data-source-summary]");
+    if (!summary) return;
+
+    const source = effectiveSourceMaterial();
+    if (!source || !source.text) {
+      summary.innerHTML = `
+        <strong>Nenhum material extraído ainda.</strong>
+        <p>Ao enviar ou colar conteúdo, o Leste Studio preserva a base original e melhora estrutura, clareza, atividades e linguagem.</p>
+      `;
+      return;
+    }
+
+    const analysis = source.analysis || {};
+    summary.innerHTML = `
+      <strong>${escapeHtml(source.fileName || "Conteúdo colado")} pronto para transformação</strong>
+      <p>${escapeHtml(source.summary || "O conteúdo será usado como base principal para gerar os materiais faltantes.")}</p>
+      <dl>
+        <dt>Origem</dt>
+        <dd>${escapeHtml(source.fileType || "Texto colado")}</dd>
+        <dt>Tamanho</dt>
+        <dd>${Number(source.charCount || source.text.length).toLocaleString("pt-BR")} caracteres</dd>
+        <dt>Indícios</dt>
+        <dd>${escapeHtml(formatSourceSignals(analysis))}</dd>
+      </dl>
+    `;
+  }
+
   function renderMatrix() {
     state.matrix = normalizeMatrix(state.matrix);
     const container = $("[data-matrix]");
+    if (!container) return;
 
     container.innerHTML = state.matrix.modules
       .map(
@@ -244,6 +325,7 @@
 
     const output = $("[data-material-output]");
     const materials = state.materials;
+    if (!output) return;
 
     if (!materials && state.activeTab !== "review") {
       output.innerHTML = `<div class="empty-state">Gere os materiais para visualizar o conteúdo.</div>`;
@@ -261,6 +343,10 @@
 
     if (state.activeTab === "workbook") {
       output.innerHTML = renderSections(materials.workbook || [], "content-card");
+    }
+
+    if (state.activeTab === "marketing") {
+      output.innerHTML = renderSections(materials.marketing || [], "content-card marketing-card");
     }
 
     if (state.activeTab === "review") {
@@ -284,6 +370,8 @@
             ${section.notesPrompt ? `<p><strong>Anotações:</strong> ${escapeHtml(section.notesPrompt)}</p>` : ""}
             ${renderList(section.facilitationNotes, "Condução")}
             ${renderList(section.transitionPhrases, "Transições")}
+            ${renderList(section.channels, "Canais")}
+            ${renderList(section.assets, "Peças sugeridas")}
           </article>
         `,
       )
@@ -322,7 +410,7 @@
   }
 
   function renderList(items, label = "") {
-    const list = Array.isArray(items) ? items : [];
+    const list = Array.isArray(items) ? items.filter(Boolean) : [];
     if (!list.length) return "";
     return `
       ${label ? `<p><strong>${escapeHtml(label)}:</strong></p>` : ""}
@@ -332,6 +420,7 @@
 
   function renderCanvaGuide() {
     const guide = $("[data-canva-guide]");
+    if (!guide) return;
     const items = state.materials && state.materials.canva && state.materials.canva.templateGuidance;
 
     guide.innerHTML = (items && items.length
@@ -346,17 +435,93 @@
       .join("");
   }
 
+  async function extractSource(source) {
+    await withLoading(source, async () => {
+      if (selectedSourceFile) {
+        const formData = new FormData();
+        formData.append("file", selectedSourceFile);
+
+        const response = await fetch("/api/extract-material", {
+          method: "POST",
+          body: formData,
+        });
+        const result = await response.json().catch(() => null);
+
+        if (!response.ok || !result || !result.ok) {
+          throw new Error((result && result.error) || "Não foi possível extrair o arquivo.");
+        }
+
+        state.mode = "transform";
+        state.sourceMaterial = normalizeSourceMaterial(result.data);
+        state.course.pastedSource = "";
+        const pastedField = $('[data-course="pastedSource"]');
+        if (pastedField) pastedField.value = "";
+        selectedSourceFile = null;
+        const sourceInput = $("[data-source-file]");
+        if (sourceInput) sourceInput.value = "";
+        const label = $("[data-source-file-name]");
+        if (label) label.textContent = state.sourceMaterial.fileName || "Material extraído";
+        state.matrix = createEmptyMatrix();
+        state.materials = null;
+        state.review = null;
+        saveState();
+        renderMode();
+        renderMatrix();
+        renderMaterials();
+        showToast("Material extraído. Agora gere a matriz ou o pacote completo.");
+        return;
+      }
+
+      const pasted = String(state.course.pastedSource || "").trim();
+      if (!pasted) {
+        showToast("Envie um arquivo ou cole um conteúdo para transformar.");
+        return;
+      }
+
+      state.mode = "transform";
+      state.sourceMaterial = makePastedSourceMaterial(pasted);
+      state.matrix = createEmptyMatrix();
+      state.materials = null;
+      state.review = null;
+      saveState();
+      renderMode();
+      renderMatrix();
+      renderMaterials();
+      showToast("Texto colado preparado para transformação.");
+    }).catch((error) => showToast(error.message || "Não foi possível extrair o material."));
+  }
+
+  function clearSource() {
+    selectedSourceFile = null;
+    state.sourceMaterial = null;
+    state.course.pastedSource = "";
+    if (state.mode === "transform") state.mode = "scratch";
+    const sourceInput = $("[data-source-file]");
+    if (sourceInput) sourceInput.value = "";
+    const pastedField = $('[data-course="pastedSource"]');
+    if (pastedField) pastedField.value = "";
+    const label = $("[data-source-file-name]");
+    if (label) label.textContent = "PDF, DOCX ou PPTX";
+    saveState();
+    renderMode();
+    showToast("Material existente removido. O app voltou para criação do zero.");
+  }
+
   async function generateMatrix(source) {
     await withLoading(source, async () => {
       try {
-        const data = await callAi("matrix", { course: state.course });
+        const data = await callAi("matrix", {
+          course: state.course,
+          mode: effectiveMode(),
+          sourceMaterial: sourcePayload(),
+        });
         state.matrix = normalizeMatrix(data);
         state.materials = null;
         state.review = null;
         saveState();
         renderMatrix();
         renderMaterials();
-        showToast("Matriz gerada com IA.");
+        showToast(hasExistingSource() ? "Matriz criada a partir do material existente." : "Matriz criada do zero com IA.");
       } catch (error) {
         state.matrix = makeLocalMatrix();
         saveState();
@@ -369,20 +534,32 @@
   async function generateMaterials(source) {
     await withLoading(source, async () => {
       if (!hasMeaningfulMatrix()) {
-        state.matrix = makeLocalMatrix();
-        renderMatrix();
+        try {
+          const matrix = await callAi("matrix", {
+            course: state.course,
+            mode: effectiveMode(),
+            sourceMaterial: sourcePayload(),
+          });
+          state.matrix = normalizeMatrix(matrix);
+          renderMatrix();
+        } catch {
+          state.matrix = makeLocalMatrix();
+          renderMatrix();
+        }
       }
 
       try {
         const data = await callAi("materials", {
           course: state.course,
           matrix: state.matrix,
+          mode: effectiveMode(),
+          sourceMaterial: sourcePayload(),
         });
         state.materials = normalizeMaterials(data);
         state.review = null;
         saveState();
         renderMaterials();
-        showToast("Materiais gerados com DeepSeek V4 Pro.");
+        showToast(hasExistingSource() ? "Pacote gerado preservando o material original." : "Pacote completo gerado do zero.");
       } catch (error) {
         state.materials = makeLocalMaterials();
         saveState();
@@ -403,6 +580,8 @@
         const data = await callAi("review", {
           course: state.course,
           materials: state.materials,
+          mode: effectiveMode(),
+          sourceMaterial: sourcePayload(),
         });
         if (data.materials) state.materials = normalizeMaterials(data.materials);
         state.review = data.review ? data : { review: data };
@@ -453,30 +632,39 @@
   }
 
   function makeLocalMatrix() {
-    const themes = [
-      ["Fundamentos estratégicos", "Diagnosticar o cenário atual e definir prioridades."],
-      ["Cliente, valor e posicionamento", "Transformar clareza de público em proposta de valor."],
-      ["Rotina de gestão e indicadores", "Organizar decisões com processos, números e acompanhamento."],
-      ["Plano de ação e comunicação", "Converter aprendizado em execução consistente."],
-    ];
+    const source = effectiveSourceMaterial();
+    const titleHint = source && source.analysis && source.analysis.theme ? source.analysis.theme : "";
+    const themes = hasExistingSource()
+      ? [
+          ["Organização do material original", "Identificar tema, público, conceitos centrais e lacunas do conteúdo recebido."],
+          ["Fundamentos e conceitos principais", "Transformar os conceitos do material em explicações claras e aplicáveis."],
+          ["Exemplos, práticas e atividades", "Converter exemplos e exercícios existentes em experiências de aprendizagem."],
+          ["Síntese, aplicação e continuidade", "Consolidar o conteúdo em plano de ação e fechamento institucional."],
+        ]
+      : [
+          ["Fundamentos estratégicos", "Diagnosticar o cenário atual e definir prioridades."],
+          ["Cliente, valor e posicionamento", "Transformar clareza de público em proposta de valor."],
+          ["Rotina de gestão e indicadores", "Organizar decisões com processos, números e acompanhamento."],
+          ["Plano de ação e comunicação", "Converter aprendizado em execução consistente."],
+        ];
 
     return {
       modules: themes.map(([title, objective], moduleIndex) => ({
-        title,
+        title: titleHint && moduleIndex === 0 ? `${title}: ${titleHint}` : title,
         objective,
-        introduction: `Neste módulo, a participante conecta ${title.toLowerCase()} à realidade do próprio negócio.`,
+        introduction: `Neste módulo, a participante conecta ${title.toLowerCase()} à realidade do próprio contexto.`,
         lessons: [0, 1].map((lessonIndex) => ({
           title: lessonIndex === 0 ? `Compreender ${title.toLowerCase()}` : `Aplicar ${title.toLowerCase()}`,
           objective:
             lessonIndex === 0
               ? "Construir repertório e linguagem comum sobre o tema."
-              : "Aplicar o conteúdo em uma decisão prática do negócio.",
+              : "Aplicar o conteúdo em uma decisão prática.",
           development:
             "A instrutora apresenta conceitos essenciais, exemplos reais e perguntas guiadas para conexão com a prática.",
-          examples: ["Exemplo de negócio local", "Situação comum de tomada de decisão"],
+          examples: ["Exemplo de situação real", "Aplicação prática em contexto institucional"],
           reflection: "O que precisa mudar na sua rotina para esse tema virar prática?",
           exercise: "Preencher um quadro de decisão com desafio, hipótese, ação e indicador.",
-          opening: "Vamos começar conectando este tema à realidade de cada negócio.",
+          opening: "Vamos começar conectando este tema à realidade de cada participante.",
           transition: "Agora que temos clareza, vamos transformar a ideia em prática.",
           closing: "Fechamos esta aula com uma ação pequena, concreta e possível de executar.",
         })),
@@ -485,12 +673,13 @@
   }
 
   function makeLocalMaterials() {
+    const source = effectiveSourceMaterial();
+    const modeLabel = hasExistingSource() ? "com base no material recebido" : "a partir do briefing";
     const manual = [
       {
         title: `Abertura do curso: ${state.course.title}`,
         kind: "abertura",
-        content:
-          "Receba a turma com acolhimento, apresente a proposta do curso e conecte o percurso à realidade das participantes.",
+        content: `Receba a turma com acolhimento, apresente a proposta do curso e explique que o percurso foi estruturado ${modeLabel}.`,
         facilitationNotes: ["Convide cada participante a nomear um desafio atual.", "Reforce que o curso é prático e progressivo."],
         transitionPhrases: ["Com esse ponto de partida, vamos entrar na estrutura do percurso."],
       },
@@ -500,7 +689,7 @@
       {
         title: state.course.title,
         kicker: "Universidade do Leste",
-        bullets: ["Percurso em 4 módulos", "Aprendizagem prática", "Aplicação no negócio"],
+        bullets: ["Percurso em 4 módulos", "Aprendizagem prática", hasExistingSource() ? "Material original preservado e aprimorado" : "Curso criado do zero"],
         speakerNotes: "Apresente o curso como uma experiência de clareza, repertório e ação.",
       },
     ];
@@ -535,7 +724,7 @@
       workbook.push({
         title: `Módulo ${moduleIndex + 1}: ${module.title}`,
         content: module.introduction || module.objective,
-        activity: "Registre uma aplicação prática deste módulo no seu negócio.",
+        activity: "Registre uma aplicação prática deste módulo no seu contexto.",
         reflection: "Qual decisão fica mais clara depois deste módulo?",
         notesPrompt: "Anotações do módulo",
       });
@@ -585,21 +774,36 @@
     workbook.push({
       title: "Encerramento",
       content:
-        "A Universidade do Leste agradece sua participação e incentiva a continuidade da aplicação prática no seu negócio.",
+        "A Universidade do Leste agradece sua participação e incentiva a continuidade da aplicação prática no seu contexto.",
       activity: "Defina uma ação para executar nos próximos sete dias.",
       reflection: "Que compromisso você assume com seu próprio desenvolvimento?",
       notesPrompt: "Plano de continuidade",
     });
 
+    const marketing = [
+      {
+        title: "Resumo de divulgação",
+        content: `${state.course.title} é um curso da Universidade do Leste estruturado para aprendizagem prática, linguagem acolhedora e aplicação imediata. ${source ? "O conteúdo original foi preservado e transformado em uma experiência pedagógica completa." : "O curso foi criado do zero com matriz 4x2 e materiais completos."}`,
+        channels: ["Página do curso", "Mensagem de WhatsApp", "Post institucional"],
+        assets: ["Chamada curta", "Descrição do curso", "Lista de benefícios", "Texto de convite"],
+      },
+      {
+        title: "Chamada curta",
+        content: `Participe do curso ${state.course.title} e avance com clareza, prática e apoio da Universidade do Leste.`,
+      },
+    ];
+
     return normalizeMaterials({
       manual,
       slides,
       workbook,
+      marketing,
       canva: {
         templateGuidance: [
           "Crie capas com azul profundo, logo oficial e detalhe dourado.",
           "Use slides com um conceito central por tela.",
           "Monte a apostila em fundo claro, com espaços generosos para anotações.",
+          "Prepare peças de divulgação com chamada curta, benefício principal e selo Universidade do Leste.",
         ],
       },
     });
@@ -644,7 +848,135 @@
       manual: Array.isArray(materials.manual) ? materials.manual : [],
       slides: Array.isArray(materials.slides) ? materials.slides : [],
       workbook: Array.isArray(materials.workbook) ? materials.workbook : [],
+      marketing: Array.isArray(materials.marketing) ? materials.marketing : [],
       canva: materials.canva || { templateGuidance: [] },
+    };
+  }
+
+  function normalizeSourceMaterial(data) {
+    const text = String(data && data.text ? data.text : "").slice(0, SOURCE_LIMIT);
+    return {
+      fileName: String((data && data.fileName) || "Material existente"),
+      fileType: String((data && data.fileType) || "material"),
+      text,
+      summary: String((data && data.summary) || ""),
+      analysis: (data && data.analysis) || analyzeTextLocally(text),
+      charCount: Number((data && data.charCount) || text.length),
+      extractedAt: new Date().toISOString(),
+    };
+  }
+
+  function makePastedSourceMaterial(text) {
+    const limitedText = String(text || "").slice(0, SOURCE_LIMIT);
+    return {
+      fileName: "Conteúdo colado",
+      fileType: "texto",
+      text: limitedText,
+      summary: firstSentence(limitedText) || "Conteúdo colado preparado para transformação pedagógica.",
+      analysis: analyzeTextLocally(limitedText),
+      charCount: limitedText.length,
+      extractedAt: new Date().toISOString(),
+    };
+  }
+
+  function analyzeTextLocally(text) {
+    const lines = String(text || "")
+      .split(/\n+/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    const moduleCount = countMatches(text, /\bm[oó]dulo\b/gi);
+    const lessonCount = countMatches(text, /\baula\b/gi);
+    const activityCount = countMatches(text, /\b(atividade|exerc[ií]cio|pr[aá]tica)\b/gi);
+    const exampleCount = countMatches(text, /\b(exemplo|caso|situa[cç][aã]o)\b/gi);
+    return {
+      theme: inferTheme(lines),
+      moduleCount,
+      lessonCount,
+      activityCount,
+      exampleCount,
+      concepts: inferConcepts(text),
+    };
+  }
+
+  function inferTheme(lines) {
+    const candidate = lines.find((line) => line.length > 12 && line.length < 100);
+    return candidate || state.course.title || "tema principal";
+  }
+
+  function inferConcepts(text) {
+    return Array.from(
+      new Set(
+        String(text || "")
+          .toLowerCase()
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .match(/\b[a-z]{5,}\b/g) || [],
+      ),
+    )
+      .filter((word) => !["curso", "aula", "modulo", "sobre", "para", "como", "entre", "atividade", "material"].includes(word))
+      .slice(0, 10);
+  }
+
+  function formatSourceSignals(analysis) {
+    const parts = [];
+    if (analysis.theme) parts.push(`tema: ${analysis.theme}`);
+    if (analysis.moduleCount) parts.push(`${analysis.moduleCount} menções a módulo`);
+    if (analysis.lessonCount) parts.push(`${analysis.lessonCount} menções a aula`);
+    if (analysis.activityCount) parts.push(`${analysis.activityCount} atividades/exercícios`);
+    if (analysis.exampleCount) parts.push(`${analysis.exampleCount} exemplos`);
+    return parts.length ? parts.join("; ") : "estrutura será interpretada pela IA";
+  }
+
+  function countMatches(text, regex) {
+    return (String(text || "").match(regex) || []).length;
+  }
+
+  function firstSentence(text) {
+    return String(text || "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .split(/(?<=[.!?])\s+/)[0]
+      .slice(0, 240);
+  }
+
+  function effectiveMode() {
+    return hasExistingSource() ? "transform" : "scratch";
+  }
+
+  function hasExistingSource() {
+    return Boolean(getSourceText());
+  }
+
+  function getSourceText() {
+    const extracted = state.sourceMaterial && state.sourceMaterial.text ? state.sourceMaterial.text : "";
+    const pasted = state.course && state.course.pastedSource ? state.course.pastedSource : "";
+    return String(extracted || pasted || "").trim();
+  }
+
+  function effectiveSourceMaterial() {
+    if (state.sourceMaterial && state.sourceMaterial.text) return state.sourceMaterial;
+    const pasted = String(state.course.pastedSource || "").trim();
+    return pasted ? makePastedSourceMaterial(pasted) : null;
+  }
+
+  function sourcePayload() {
+    const source = effectiveSourceMaterial();
+    if (!source || !source.text) {
+      return {
+        hasContent: false,
+        instruction:
+          "Não há material existente. Crie o curso do zero com profundidade pedagógica, matriz 4x2, linguagem acolhedora e identidade institucional.",
+      };
+    }
+
+    return {
+      hasContent: true,
+      fileName: source.fileName,
+      fileType: source.fileType,
+      text: source.text.slice(0, SOURCE_LIMIT),
+      analysis: source.analysis || analyzeTextLocally(source.text),
+      instruction:
+        "Há material existente. Preserve a intenção, os conceitos, exemplos e atividades originais sempre que forem úteis; reorganize, complete lacunas e melhore clareza, didática e padrão institucional.",
     };
   }
 
@@ -654,19 +986,33 @@
 
   async function withLoading(source, callback) {
     const panel = source && source.closest(".panel");
-    source && (source.disabled = true);
-    panel && panel.classList.add("loading");
+    if (source) source.disabled = true;
+    if (panel) panel.classList.add("loading");
 
     try {
       await callback();
     } finally {
-      source && (source.disabled = false);
-      panel && panel.classList.remove("loading");
+      if (source) source.disabled = false;
+      if (panel) panel.classList.remove("loading");
     }
   }
 
   function downloadJson() {
-    downloadFile("leste-studio-materiais.json", JSON.stringify({ course: state.course, matrix: state.matrix, materials: state.materials }, null, 2), "application/json");
+    downloadFile(
+      "leste-studio-materiais.json",
+      JSON.stringify(
+        {
+          mode: effectiveMode(),
+          course: state.course,
+          sourceMaterial: effectiveSourceMaterial(),
+          matrix: state.matrix,
+          materials: state.materials,
+        },
+        null,
+        2,
+      ),
+      "application/json",
+    );
   }
 
   function downloadTxt() {
@@ -690,7 +1036,9 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           format,
+          mode: effectiveMode(),
           course: state.course,
+          sourceMaterial: effectiveSourceMaterial(),
           matrix: state.matrix,
           materials: state.materials,
         }),
@@ -698,25 +1046,30 @@
 
       if (!response.ok) {
         const result = await response.json().catch(() => null);
-        throw new Error((result && result.error) || "Nao foi possivel exportar o documento.");
+        throw new Error((result && result.error) || "Não foi possível exportar o documento.");
       }
 
       const blob = await response.blob();
       const filename = filenameFromResponse(response) || `leste-studio-materiais.${format}`;
       downloadBlob(filename, blob);
-      showToast(format === "pdf" ? "PDF profissional gerado." : "DOCX editavel gerado.");
+      showToast(format === "pdf" ? "PDF profissional gerado." : "DOCX editável gerado.");
     }).catch((error) => {
-      showToast(error.message || "Nao foi possivel exportar o documento.");
+      showToast(error.message || "Não foi possível exportar o documento.");
     });
   }
 
   function exportAsText() {
-    const lines = [`LESTE STUDIO`, `Curso: ${state.course.title}`, ""];
+    const lines = [`LESTE STUDIO`, `Modo: ${effectiveMode() === "transform" ? "Transformar material existente" : "Criar curso do zero"}`, `Curso: ${state.course.title}`, ""];
     const materials = state.materials || makeLocalMaterials();
 
-    ["manual", "slides", "workbook"].forEach((key) => {
-      lines.push(key.toUpperCase(), "");
-      materials[key].forEach((item, index) => {
+    [
+      ["manual", "MANUAL DA INSTRUTORA"],
+      ["slides", "SLIDES"],
+      ["workbook", "APOSTILA DO ALUNO"],
+      ["marketing", "MATERIAIS DE DIVULGAÇÃO"],
+    ].forEach(([key, label]) => {
+      lines.push(label, "");
+      (materials[key] || []).forEach((item, index) => {
         lines.push(`${index + 1}. ${item.title || "Seção"}`);
         if (item.content) lines.push(item.content);
         if (item.bullets) item.bullets.forEach((bullet) => lines.push(`- ${bullet}`));
@@ -746,11 +1099,16 @@
 <body>
   <h1>${escapeHtml(state.course.title)}</h1>
   <p>Material gerado pelo Leste Studio, Universidade do Leste.</p>
-  ${["manual", "slides", "workbook"]
+  ${[
+    ["manual", "Manual da Instrutora"],
+    ["slides", "Slides"],
+    ["workbook", "Apostila do Aluno"],
+    ["marketing", "Materiais de Divulgação"],
+  ]
     .map(
-      (key) => `
-        <h2>${key === "manual" ? "Manual da Instrutora" : key === "slides" ? "Slides" : "Apostila do Aluno"}</h2>
-        ${materials[key]
+      ([key, label]) => `
+        <h2>${label}</h2>
+        ${(materials[key] || [])
           .map(
             (item) => `
               <section>
@@ -806,6 +1164,7 @@
 
   function showToast(message) {
     const toast = $("[data-toast]");
+    if (!toast) return;
     toast.textContent = message;
     toast.classList.add("is-visible");
     clearTimeout(toastTimer);

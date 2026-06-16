@@ -27,6 +27,8 @@ type MaterialItem = {
   content?: string;
   facilitationNotes?: string[];
   transitionPhrases?: string[];
+  channels?: string[];
+  assets?: string[];
   bullets?: string[];
   speakerNotes?: string;
   activity?: string;
@@ -38,17 +40,18 @@ type Materials = {
   manual: MaterialItem[];
   slides: MaterialItem[];
   workbook: MaterialItem[];
+  marketing: MaterialItem[];
 };
 
 export default async (req: Request, context: Context) => {
   if (req.method !== "POST") {
-    return jsonResponse(405, { ok: false, error: "Metodo nao permitido." });
+    return jsonResponse(405, { ok: false, error: "Método não permitido." });
   }
 
   const payload = await req.json().catch(() => null);
 
   if (!payload || typeof payload !== "object") {
-    return jsonResponse(400, { ok: false, error: "Envio invalido." });
+    return jsonResponse(400, { ok: false, error: "Envio inválido." });
   }
 
   const format = stringValue((payload as { format?: unknown }).format).toLowerCase();
@@ -70,7 +73,7 @@ export default async (req: Request, context: Context) => {
     return binaryResponse(bytes, "application/pdf", filename);
   }
 
-  return jsonResponse(400, { ok: false, error: "Formato invalido. Use pdf ou docx." });
+  return jsonResponse(400, { ok: false, error: "Formato inválido. Use pdf ou docx." });
 };
 
 export const config: Config = {
@@ -89,7 +92,7 @@ async function buildDocx(course: Course, materials: Materials, logoBytes: Uint8A
     new Paragraph({
       children: [
         new TextRun({
-          text: "Manual da Instrutora, Slides e Apostila do Aluno",
+          text: "Manual da Instrutora, Slides, Apostila do Aluno e Divulgação",
           color: "00385F",
           bold: true,
         }),
@@ -104,6 +107,7 @@ async function buildDocx(course: Course, materials: Materials, logoBytes: Uint8A
   addDocxGroup(children, "Manual da Instrutora", materials.manual, true);
   addDocxGroup(children, "Slides", materials.slides, true);
   addDocxGroup(children, "Apostila do Aluno", materials.workbook, true);
+  addDocxGroup(children, "Materiais de Divulgação", materials.marketing, true);
 
   children.push(
     new Paragraph({
@@ -114,7 +118,7 @@ async function buildDocx(course: Course, materials: Materials, logoBytes: Uint8A
     new Paragraph({
       children: [
         new TextRun(
-          "A Universidade do Leste agradece sua participacao e incentiva a continuidade do aprendizado com pratica, clareza e compromisso institucional.",
+          "A Universidade do Leste agradece sua participação e incentiva a continuidade do aprendizado com prática, clareza e compromisso institucional.",
         ),
       ],
     }),
@@ -177,9 +181,9 @@ async function buildDocx(course: Course, materials: Materials, logoBytes: Uint8A
 
 function addMetadata(children: Paragraph[], course: Course) {
   const records = [
-    ["Publico", course.audience],
+    ["Público", course.audience],
     ["Objetivo", course.goal],
-    ["Carga horaria", course.duration],
+    ["Carga horária", course.duration],
     ["Modalidade", course.modality],
   ].filter((record) => stringValue(record[1]));
 
@@ -188,7 +192,7 @@ function addMetadata(children: Paragraph[], course: Course) {
   children.push(
     new Paragraph({
       heading: HeadingLevel.HEADING_2,
-      children: [new TextRun("Visao geral")],
+      children: [new TextRun("Visão geral")],
     }),
   );
 
@@ -217,18 +221,20 @@ function addDocxGroup(children: Paragraph[], label: string, items: MaterialItem[
     children.push(
       new Paragraph({
         heading: HeadingLevel.HEADING_2,
-        children: [new TextRun(`${index + 1}. ${stringValue(item.title, "Secao")}`)],
+        children: [new TextRun(`${index + 1}. ${stringValue(item.title, "Seção")}`)],
       }),
     );
 
     pushDocxParagraph(children, item.content);
     pushDocxList(children, item.bullets);
-    pushDocxList(children, item.facilitationNotes, "Orientacao");
-    pushDocxList(children, item.transitionPhrases, "Transicao");
+    pushDocxList(children, item.facilitationNotes, "Orientação");
+    pushDocxList(children, item.transitionPhrases, "Transição");
+    pushDocxList(children, item.channels, "Canais");
+    pushDocxList(children, item.assets, "Peças sugeridas");
     pushDocxParagraph(children, item.speakerNotes, "Notas da instrutora");
     pushDocxParagraph(children, item.activity, "Atividade");
-    pushDocxParagraph(children, item.reflection, "Reflexao");
-    pushDocxParagraph(children, item.notesPrompt, "Espaco para anotacoes");
+    pushDocxParagraph(children, item.reflection, "Reflexão");
+    pushDocxParagraph(children, item.notesPrompt, "Espaço para anotações");
   });
 }
 
@@ -294,7 +300,7 @@ function buildDocxFooter() {
       new Paragraph({
         alignment: AlignmentType.RIGHT,
         children: [
-          new TextRun({ text: "Universidade do Leste | Pagina ", color: "5B6775", size: 18 }),
+          new TextRun({ text: "Universidade do Leste | Página ", color: "5B6775", size: 18 }),
           new TextRun({ children: [PageNumber.CURRENT], color: "5B6775", size: 18 }),
         ],
       }),
@@ -346,7 +352,7 @@ async function buildPdf(course: Course, materials: Materials, logoBytes: Uint8Ar
     },
     ensurePage: () => undefined,
   });
-  page.drawText("Manual da Instrutora | Slides | Apostila do Aluno", {
+  page.drawText("Manual da Instrutora | Slides | Apostila | Divulgação", {
     x: margin,
     y: size[1] - 335,
     size: 14,
@@ -360,9 +366,10 @@ async function buildPdf(course: Course, materials: Materials, logoBytes: Uint8Ar
   drawPdfGroup("Manual da Instrutora", materials.manual);
   drawPdfGroup("Slides", materials.slides);
   drawPdfGroup("Apostila do Aluno", materials.workbook);
+  drawPdfGroup("Materiais de Divulgação", materials.marketing);
   drawPdfHeading("Universidade do Leste", 19, true);
   drawPdfParagraph(
-    "A Universidade do Leste agradece sua participacao e incentiva a continuidade do aprendizado com pratica, clareza e compromisso institucional.",
+    "A Universidade do Leste agradece sua participação e incentiva a continuidade do aprendizado com prática, clareza e compromisso institucional.",
   );
 
   pdf.getPages().forEach((currentPage, index) => {
@@ -372,7 +379,7 @@ async function buildPdf(course: Course, materials: Materials, logoBytes: Uint8Ar
       thickness: 0.5,
       color: rgb(225 / 255, 232 / 255, 238 / 255),
     });
-    currentPage.drawText(`Universidade do Leste | Pagina ${index + 1}`, {
+    currentPage.drawText(`Universidade do Leste | Página ${index + 1}`, {
       x: margin,
       y: 24,
       size: 8,
@@ -402,11 +409,11 @@ async function buildPdf(course: Course, materials: Materials, logoBytes: Uint8Ar
   }
 
   function drawPdfMetadata(metadata: Course) {
-    drawPdfHeading("Visao geral", 18, false);
+    drawPdfHeading("Visão geral", 18, false);
     [
-      ["Publico", metadata.audience],
+      ["Público", metadata.audience],
       ["Objetivo", metadata.goal],
-      ["Carga horaria", metadata.duration],
+      ["Carga horária", metadata.duration],
       ["Modalidade", metadata.modality],
     ].forEach(([label, value]) => {
       if (!stringValue(value)) return;
@@ -418,15 +425,17 @@ async function buildPdf(course: Course, materials: Materials, logoBytes: Uint8Ar
     drawPdfHeading(label, 19, true);
 
     items.forEach((item, index) => {
-      drawPdfHeading(`${index + 1}. ${stringValue(item.title, "Secao")}`, 13, false);
+      drawPdfHeading(`${index + 1}. ${stringValue(item.title, "Seção")}`, 13, false);
       drawPdfParagraph(item.content);
       drawPdfBullets(item.bullets);
-      drawPdfBullets(item.facilitationNotes, "Orientacao");
-      drawPdfBullets(item.transitionPhrases, "Transicao");
+      drawPdfBullets(item.facilitationNotes, "Orientação");
+      drawPdfBullets(item.transitionPhrases, "Transição");
+      drawPdfBullets(item.channels, "Canais");
+      drawPdfBullets(item.assets, "Peças sugeridas");
       drawPdfParagraph(item.speakerNotes, "Notas da instrutora");
       drawPdfParagraph(item.activity, "Atividade");
-      drawPdfParagraph(item.reflection, "Reflexao");
-      drawPdfParagraph(item.notesPrompt, "Espaco para anotacoes");
+      drawPdfParagraph(item.reflection, "Reflexão");
+      drawPdfParagraph(item.notesPrompt, "Espaço para anotações");
       y -= 6;
     });
   }
@@ -569,6 +578,7 @@ function normalizeMaterials(value: Record<string, unknown>): Materials {
     manual: normalizeItems(value.manual),
     slides: normalizeItems(value.slides),
     workbook: normalizeItems(value.workbook),
+    marketing: normalizeItems(value.marketing),
   };
 }
 
