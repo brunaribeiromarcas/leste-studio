@@ -250,6 +250,11 @@
     </div>
 
     <div class="toast" data-toast role="status" aria-live="polite"></div>
+    <script type="module">
+      import * as pdfjs from "./vendor/pdf.mjs";
+      window.lestePdfJs = pdfjs;
+      window.dispatchEvent(new CustomEvent("leste:pdf-ready"));
+    </script>
     <script src="studio.js"></script>
   </body>
 </html>

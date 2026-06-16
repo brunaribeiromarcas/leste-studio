@@ -19,7 +19,7 @@ type SourceAnalysis = {
   possibleLessons: string[];
 };
 
-const MAX_UPLOAD_BYTES = 18 * 1024 * 1024;
+const MAX_UPLOAD_BYTES = 6 * 1024 * 1024;
 const MAX_TEXT_CHARS = 120000;
 
 export default async (req: Request, context: Context) => {
@@ -44,7 +44,10 @@ export default async (req: Request, context: Context) => {
     }
 
     if (size > MAX_UPLOAD_BYTES) {
-      return jsonResponse(413, { ok: false, error: "Arquivo muito grande. Envie um arquivo de até 18 MB." });
+      return jsonResponse(413, {
+        ok: false,
+        error: "Arquivo muito grande para leitura pelo servidor. Envie DOCX/PPTX de até 6 MB ou cole o conteúdo no campo de texto.",
+      });
     }
 
     const bytes = new Uint8Array(await file.arrayBuffer());

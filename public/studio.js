@@ -1,12 +1,17 @@
 (function () {
   const STORAGE_KEY = "leste-studio-ai-v2";
-  const SOURCE_LIMIT = 36000;
+  const SOURCE_LIMIT = 22000;
+  const SOURCE_STORE_LIMIT = 120000;
+  const SERVER_UPLOAD_LIMIT_BYTES = 6 * 1024 * 1024;
+  const LARGE_PDF_WARNING_BYTES = 15 * 1024 * 1024;
+  const MAX_PDF_PAGES = 120;
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
 
   const state = loadState();
   let toastTimer = null;
   let selectedSourceFile = null;
+  let pdfJsModulePromise = null;
 
   init();
 
@@ -144,6 +149,12 @@
         selectedSourceFile = sourceInput.files && sourceInput.files[0] ? sourceInput.files[0] : null;
         const label = $("[data-source-file-name]");
         if (label) label.textContent = selectedSourceFile ? selectedSourceFile.name : "PDF, DOCX ou PPTX";
+        if (selectedSourceFile && isPdfFile(selectedSourceFile) && selectedSourceFile.size > LARGE_PDF_WARNING_BYTES) {
+          showToast("PDF grande selecionado. A leitura será feita no navegador e pode levar alguns instantes.");
+        }
+        if (selectedSourceFile && !isPdfFile(selectedSourceFile) && selectedSourceFile.size > SERVER_UPLOAD_LIMIT_BYTES) {
+          showToast("DOCX/PPTX acima de 6 MB não pode ser enviado ao servidor. Cole o conteúdo no campo de texto.");
+        }
       });
     }
   }
@@ -438,6 +449,40 @@
   async function extractSource(source) {
     await withLoading(source, async () => {
       if (selectedSourceFile) {
+        if (isPdfFile(selectedSourceFile)) {
+          if (selectedSourceFile.size > LARGE_PDF_WARNING_BYTES) {
+            showToast("PDF grande detectado. Vou ler no navegador; pode levar alguns instantes.");
+          } else {
+            showToast("Lendo PDF no navegador.");
+          }
+
+          state.mode = "transform";
+          state.sourceMaterial = await extractPdfInBrowser(selectedSourceFile);
+          state.course.pastedSource = "";
+          const pastedField = $('[data-course="pastedSource"]');
+          if (pastedField) pastedField.value = "";
+          selectedSourceFile = null;
+          const sourceInput = $("[data-source-file]");
+          if (sourceInput) sourceInput.value = "";
+          const label = $("[data-source-file-name]");
+          if (label) label.textContent = state.sourceMaterial.fileName || "PDF extraído";
+          state.matrix = createEmptyMatrix();
+          state.materials = null;
+          state.review = null;
+          saveState();
+          renderMode();
+          renderMatrix();
+          renderMaterials();
+          showToast("PDF lido no navegador. Agora gere a matriz ou o pacote completo.");
+          return;
+        }
+
+        if (selectedSourceFile.size > SERVER_UPLOAD_LIMIT_BYTES) {
+          throw new Error(
+            "Este arquivo é grande demais para leitura pelo servidor. Para DOCX/PPTX, envie um arquivo de até 6 MB ou cole o conteúdo no campo de texto.",
+          );
+        }
+
         const formData = new FormData();
         formData.append("file", selectedSourceFile);
 
@@ -488,7 +533,9 @@
       renderMatrix();
       renderMaterials();
       showToast("Texto colado preparado para transformação.");
-    }).catch((error) => showToast(error.message || "Não foi possível extrair o material."));
+    }, selectedSourceFile && isPdfFile(selectedSourceFile) ? "Lendo PDF..." : "Extraindo...").catch((error) => {
+      showToast(error.message || "Não foi possível extrair o material.");
+    });
   }
 
   function clearSource() {
@@ -505,6 +552,100 @@
     saveState();
     renderMode();
     showToast("Material existente removido. O app voltou para criação do zero.");
+  }
+
+  function isPdfFile(file) {
+    const name = String(file && file.name ? file.name : "").toLowerCase();
+    const type = String(file && file.type ? file.type : "").toLowerCase();
+    return name.endsWith(".pdf") || type.includes("pdf");
+  }
+
+  async function extractPdfInBrowser(file) {
+    const pdfjs = await getPdfJs();
+    pdfjs.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.mjs";
+
+    const bytes = await file.arrayBuffer();
+    const pdf = await pdfjs.getDocument({ data: bytes }).promise;
+    const pageLimit = Math.min(pdf.numPages, MAX_PDF_PAGES);
+    const chunks = [];
+    let totalChars = 0;
+
+    for (let pageNumber = 1; pageNumber <= pageLimit; pageNumber += 1) {
+      const page = await pdf.getPage(pageNumber);
+      const content = await page.getTextContent();
+      const pageText = content.items
+        .map((item) => (item && typeof item.str === "string" ? item.str : ""))
+        .filter(Boolean)
+        .join(" ");
+
+      if (pageText.trim()) {
+        chunks.push(`Página ${pageNumber}\n${pageText}`);
+        totalChars += pageText.length;
+      }
+
+      if (totalChars >= SOURCE_STORE_LIMIT) break;
+    }
+
+    const text = normalizeExtractedText(chunks.join("\n\n")).slice(0, SOURCE_STORE_LIMIT);
+
+    if (!text || text.length < 20) {
+      throw new Error(
+        "Este PDF parece ser escaneado ou não tem texto selecionável. Cole o conteúdo no campo de texto ou envie uma versão DOCX/PPTX.",
+      );
+    }
+
+    return normalizeSourceMaterial({
+      fileName: file.name,
+      fileType: "pdf",
+      text,
+      charCount: text.length,
+      summary: firstSentence(text) || "PDF lido no navegador e preparado para transformação pedagógica.",
+      analysis: analyzeTextLocally(text),
+      truncated: pdf.numPages > pageLimit || text.length >= SOURCE_STORE_LIMIT,
+      pageCount: pdf.numPages,
+      pagesRead: pageLimit,
+    });
+  }
+
+  async function getPdfJs() {
+    if (window.lestePdfJs && window.lestePdfJs.getDocument) {
+      return window.lestePdfJs;
+    }
+
+    if (!pdfJsModulePromise) {
+      pdfJsModulePromise = new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          import("./vendor/pdf.mjs").then(resolve).catch(reject);
+        }, 1200);
+
+        window.addEventListener(
+          "leste:pdf-ready",
+          () => {
+            clearTimeout(timeout);
+            resolve(window.lestePdfJs);
+          },
+          { once: true },
+        );
+      });
+    }
+
+    try {
+      const pdfjs = await pdfJsModulePromise;
+      if (!pdfjs || !pdfjs.getDocument) throw new Error("Módulo de PDF indisponível.");
+      return pdfjs;
+    } catch (error) {
+      pdfJsModulePromise = null;
+      throw new Error(`Não foi possível carregar o leitor de PDF. ${error.message || error}`);
+    }
+  }
+
+  function normalizeExtractedText(text) {
+    return String(text || "")
+      .replace(/\r/g, "\n")
+      .replace(/[ \t]+\n/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .replace(/[ \t]{2,}/g, " ")
+      .trim();
   }
 
   async function generateMatrix(source) {
@@ -854,7 +995,7 @@
   }
 
   function normalizeSourceMaterial(data) {
-    const text = String(data && data.text ? data.text : "").slice(0, SOURCE_LIMIT);
+    const text = String(data && data.text ? data.text : "").slice(0, SOURCE_STORE_LIMIT);
     return {
       fileName: String((data && data.fileName) || "Material existente"),
       fileType: String((data && data.fileType) || "material"),
@@ -867,7 +1008,7 @@
   }
 
   function makePastedSourceMaterial(text) {
-    const limitedText = String(text || "").slice(0, SOURCE_LIMIT);
+    const limitedText = String(text || "").slice(0, SOURCE_STORE_LIMIT);
     return {
       fileName: "Conteúdo colado",
       fileType: "texto",
@@ -973,26 +1114,52 @@
       hasContent: true,
       fileName: source.fileName,
       fileType: source.fileType,
-      text: source.text.slice(0, SOURCE_LIMIT),
+      text: buildAiSourceText(source.text),
       analysis: source.analysis || analyzeTextLocally(source.text),
       instruction:
         "Há material existente. Preserve a intenção, os conceitos, exemplos e atividades originais sempre que forem úteis; reorganize, complete lacunas e melhore clareza, didática e padrão institucional.",
     };
   }
 
+  function buildAiSourceText(text) {
+    const normalized = normalizeExtractedText(text);
+    if (normalized.length <= SOURCE_LIMIT) return normalized;
+
+    const head = normalized.slice(0, Math.round(SOURCE_LIMIT * 0.62));
+    const tail = normalized.slice(-Math.round(SOURCE_LIMIT * 0.22));
+    const headings = normalized
+      .split(/\n+/)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 4 && line.length < 120)
+      .filter((line) => /módulo|modulo|aula|tema|atividade|exercício|exercicio|capítulo|capitulo|parte|slide/i.test(line))
+      .slice(0, 80)
+      .join("\n");
+
+    return normalizeExtractedText(
+      [
+        head,
+        headings ? "\n\nTítulos e sinais estruturais encontrados:\n" + headings : "",
+        "\n\nTrecho final do material:\n" + tail,
+      ].join(""),
+    ).slice(0, SOURCE_LIMIT);
+  }
+
   function hasMeaningfulMatrix() {
     return state.matrix.modules.some((module) => module.objective || module.lessons.some((lesson) => lesson.objective));
   }
 
-  async function withLoading(source, callback) {
+  async function withLoading(source, callback, loadingLabel = "Processando...") {
     const panel = source && source.closest(".panel");
+    const originalText = source ? source.textContent : "";
     if (source) source.disabled = true;
+    if (source && source.tagName === "BUTTON") source.textContent = loadingLabel;
     if (panel) panel.classList.add("loading");
 
     try {
       await callback();
     } finally {
       if (source) source.disabled = false;
+      if (source && source.tagName === "BUTTON") source.textContent = originalText;
       if (panel) panel.classList.remove("loading");
     }
   }
