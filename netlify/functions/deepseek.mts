@@ -97,21 +97,51 @@ async function handleGenerate(req: Request) {
 
   const task = String((body as { task?: unknown }).task || "");
   const startedAt = Date.now();
-  const messages = buildMessages(task, body as Record<string, unknown>);
+  const payload = body as Record<string, unknown>;
+  const source = normalizeSourceMaterial(payload.sourceMaterial);
+  const messages = buildMessages(task, payload);
 
   if (!messages) {
     return jsonResponse(400, { ok: false, error: "Tarefa de geração inválida." });
   }
 
-  const completion = await callDeepSeek(messages, config, task);
-  const parsed = parseJsonContent(completion.content);
-  const data = completeGeneratedData(task, parsed, body as Record<string, unknown>);
+  if (source.hasContent && isWeakSourceMaterial(source)) {
+    return jsonResponse(422, {
+      ok: false,
+      error:
+        "O PDF extraído ainda não tem conteúdo útil. Ele parece conter apenas rodapé, paginação, marca d'água ou texto muito fragmentado.",
+      hint: "Reenvie o arquivo e aguarde o OCR terminar, ou cole o texto principal do material no campo ao lado.",
+    });
+  }
+
+  let completion: Awaited<ReturnType<typeof callDeepSeek>> | null = null;
+  let data: unknown;
+  let fallback: { used: boolean; reason: string } | null = null;
+
+  try {
+    completion = await callDeepSeek(messages, config, task);
+    const parsed = parseJsonContent(completion.content);
+    data = completeGeneratedData(task, parsed, payload);
+  } catch (error) {
+    const fallbackData = completeGenerationFallback(task, payload, cleanError(error));
+
+    if (!fallbackData) {
+      throw error;
+    }
+
+    data = fallbackData.data;
+    fallback = {
+      used: true,
+      reason: fallbackData.reason,
+    };
+  }
 
   return jsonResponse(200, {
     ok: true,
     model: config.model,
     task,
-    usage: completion.usage || null,
+    usage: completion && completion.usage ? completion.usage : null,
+    fallback,
     elapsedMs: Date.now() - startedAt,
     data,
   });
@@ -177,7 +207,7 @@ async function handleDeepSeekTest() {
     network,
     hint: ok
       ? "DeepSeek conectado corretamente."
-      : getDeepSeekHint(firstError && firstError.error, firstError && firstError.status, network),
+      : getDeepSeekHint(firstError?.error || undefined, firstError?.status || undefined, network),
   });
 }
 
@@ -247,13 +277,6 @@ function buildMessages(task: string, payload: Record<string, unknown>) {
                   {
                     title: "Nome da aula",
                     objective: "Objetivo da aula",
-                    development: "Desenvolvimento do tema",
-                    examples: ["Exemplo prático"],
-                    reflection: "Pergunta de reflexão",
-                    exercise: "Exercício prático",
-                    opening: "Frase de abertura",
-                    transition: "Frase de transição",
-                    closing: "Frase de encerramento",
                   },
                 ],
               },
@@ -263,6 +286,8 @@ function buildMessages(task: string, payload: Record<string, unknown>) {
             "Criar exatamente 4 módulos.",
             "Cada módulo deve ter exatamente 2 aulas.",
             "As aulas devem evoluir de fundamentos para aplicação prática.",
+            "Retorne apenas title, objective, introduction e lessons com title e objective. Não inclua development, examples, reflection, exercise, opening, transition nem closing nesta etapa.",
+            "Use textos curtos: títulos até 70 caracteres, objetivos até 160 caracteres e introduções até 220 caracteres.",
             source.hasContent
               ? "Reorganizar o material recebido sem descaracterizar o conteúdo original."
               : "Criar um percurso completo a partir dos dados informados.",
@@ -411,7 +436,7 @@ async function callDeepSeek(messages: unknown[], config: DeepSeekConfig, task: s
 }
 
 function maxTokensForTask(task: string) {
-  if (task === "matrix") return 1100;
+  if (task === "matrix") return 1400;
   if (task === "review") return 2600;
   return 4800;
 }
@@ -422,6 +447,292 @@ function completeGeneratedData(task: string, data: unknown, payload: Record<stri
   if (task === "review") return completeReviewData(data, payload);
   return data;
 }
+
+function completeGenerationFallback(task: string, payload: Record<string, unknown>, reason: string) {
+  const source = normalizeSourceMaterial(payload.sourceMaterial);
+
+  if (!source.hasContent || isWeakSourceMaterial(source)) {
+    return null;
+  }
+
+  if (task === "matrix") {
+    return {
+      data: buildMatrixFromSource(payload),
+      reason: `A IA falhou ou respondeu fora do formato esperado. Usei uma matriz estruturada a partir do material extraído. Detalhe: ${limitText(reason, 140)}`,
+    };
+  }
+
+  if (task === "materials") {
+    const matrix = hasMatrixShape(payload.matrix) ? payload.matrix : buildMatrixFromSource(payload);
+
+    return {
+      data: completeMaterials({ ...payload, matrix }),
+      reason: `A IA falhou ou respondeu fora do formato esperado. Usei o conteúdo extraído e a matriz disponível para gerar um pacote editável. Detalhe: ${limitText(reason, 140)}`,
+    };
+  }
+
+  return null;
+}
+
+function buildMatrixFromSource(payload: Record<string, unknown>): Matrix {
+  const course = asRecord(payload.course);
+  const source = normalizeSourceMaterial(payload.sourceMaterial);
+  const theme = inferSourceTheme(source, course);
+  const concepts = inferSourceConcepts(source);
+  const headings = inferSourceHeadings(source.text, theme);
+  const examples = inferSourceExamples(source.text);
+
+  const moduleBlueprints = [
+    {
+      title: headings[0] || `Contexto e diagnóstico: ${theme}`,
+      objective: `Compreender o contexto central do material original e organizar o percurso de aprendizagem sobre ${theme}.`,
+      introduction: `Neste módulo, a turma reconhece o ponto de partida do material, identifica o problema principal e cria uma base comum para avançar com segurança.`,
+      lessons: [
+        ["Leitura do problema central", `Identificar o tema, o público, a promessa pedagógica e as principais necessidades presentes no material original.`],
+        ["Organização da base de aprendizagem", `Transformar o conteúdo recebido em uma estrutura clara de conceitos, decisões e prioridades.`],
+      ],
+    },
+    {
+      title: headings[1] || `Fundamentos e conceitos: ${joinTerms(concepts.slice(0, 2), "conceitos principais")}`,
+      objective: `Explicar os conceitos essenciais do material com linguagem clara, aplicável e institucional.`,
+      introduction: `Neste módulo, os conceitos centrais são traduzidos em explicações objetivas, com foco no entendimento adulto e na aplicação prática.`,
+      lessons: [
+        [`Conceitos-chave de ${concepts[0] || theme}`, `Compreender os fundamentos que sustentam o tema e diferenciar ideias parecidas no contexto real.`],
+        [`Critérios de decisão e exemplos`, `Analisar exemplos do material para transformar conceitos em critérios práticos de escolha e ação.`],
+      ],
+    },
+    {
+      title: headings[2] || `Aplicação prática: ${joinTerms(concepts.slice(2, 4), "exercícios e exemplos")}`,
+      objective: `Converter o material original em atividades, exercícios e situações de prática orientada.`,
+      introduction: `Neste módulo, a aprendizagem sai da explicação e entra na experimentação, conectando o conteúdo à realidade das participantes.`,
+      lessons: [
+        ["Exemplos guiados e análise de casos", `Aplicar os conceitos do material em situações concretas, com perguntas de reflexão e análise.`],
+        ["Atividades para prática acompanhada", `Criar exercícios que ajudem a participante a testar, registrar e ajustar o aprendizado.`],
+      ],
+    },
+    {
+      title: headings[3] || "Síntese, plano de ação e continuidade",
+      objective: `Consolidar aprendizados, organizar próximos passos e encerrar o curso com presença institucional da Universidade do Leste.`,
+      introduction: `Neste módulo, a turma transforma os aprendizados em plano de ação, define compromissos de aplicação e fecha o percurso com clareza.`,
+      lessons: [
+        ["Síntese dos aprendizados", `Retomar os conceitos principais e organizar uma visão prática do que deve ser aplicado primeiro.`],
+        ["Plano de ação e encerramento", `Definir próximos passos, indicadores simples de avanço e fechamento institucional do curso.`],
+      ],
+    },
+  ];
+
+  return {
+    modules: moduleBlueprints.map((moduleItem, moduleIndex) => ({
+      title: limitText(moduleItem.title, 90),
+      objective: moduleItem.objective,
+      introduction: moduleItem.introduction,
+      lessons: moduleItem.lessons.map(([title, objective], lessonIndex) => {
+        const focus = concepts[moduleIndex + lessonIndex] || theme;
+        const example = examples[(moduleIndex * 2 + lessonIndex) % Math.max(examples.length, 1)];
+
+        return {
+          title,
+          objective,
+          development: `Conduza a aula conectando ${focus} ao material original. Retome trechos relevantes, explique o conceito em linguagem simples e convide a turma a aplicar o aprendizado em uma situação real.`,
+          examples: [
+            example || `Situação prática relacionada a ${focus}.`,
+            `Aplicação orientada para adaptar ${focus} à realidade da participante.`,
+          ],
+          reflection: `Como este ponto aparece hoje na sua prática e que ajuste faria diferença nos próximos dias?`,
+          exercise: `Registrar uma ação concreta para aplicar ${focus} em um caso real, com prazo e próximo passo definido.`,
+          opening: "Vamos começar conectando o material original à experiência de vocês.",
+          transition: "Com essa base organizada, podemos avançar para a próxima aplicação.",
+          closing: "Guarde uma decisão prática desta aula para levar ao seu contexto real.",
+        };
+      }),
+    })),
+  };
+}
+
+function hasMatrixShape(value: unknown) {
+  return Array.isArray(asRecord(value).modules) && (asRecord(value).modules as unknown[]).length > 0;
+}
+
+function isWeakSourceMaterial(source: ReturnType<typeof normalizeSourceMaterial>) {
+  const fileName = source.fileName.toLowerCase();
+  const fileType = source.fileType.toLowerCase();
+
+  if (fileType !== "pdf" && !fileName.endsWith(".pdf")) {
+    return false;
+  }
+
+  return isWeakExtractedText(source.text);
+}
+
+function isWeakExtractedText(text: string) {
+  const normalized = normalizeForMatch(text);
+  const handleCount = (normalized.match(/@[a-z0-9_.-]+/g) || []).length;
+  const pageCount = (normalized.match(/\bpagina\s+\d+\b/g) || []).length;
+  const words = extractWords(text).filter((word) => !SOURCE_STOP_WORDS.has(normalizeForMatch(word)));
+  const hasMostlyMarkers = pageCount >= 3 && handleCount >= 2;
+  const hasTooLittleContent = words.length < 55 && normalized.length < 1800;
+
+  return normalized.length < 80 || hasMostlyMarkers || (hasTooLittleContent && pageCount >= 2);
+}
+
+function inferSourceTheme(source: ReturnType<typeof normalizeSourceMaterial>, course: Record<string, unknown>) {
+  const analysisTheme = cleanDisplayText(stringValue(source.analysis.theme));
+  const heading = inferSourceHeadings(source.text, "")[0];
+  const courseTitle = cleanDisplayText(stringValue(course.title));
+
+  return (
+    validDisplayText(analysisTheme) ||
+    validDisplayText(heading) ||
+    validDisplayText(courseTitle) ||
+    "material original"
+  );
+}
+
+function inferSourceHeadings(text: string, theme: string) {
+  const normalizedTheme = normalizeForMatch(theme);
+  const lines = String(text || "")
+    .split(/\n+/)
+    .map(cleanDisplayText)
+    .filter((line) => {
+      const normalized = normalizeForMatch(line);
+      if (!validDisplayText(line)) return false;
+      if (normalized === normalizedTheme) return false;
+      if (/^pagina\s+\d+/.test(normalized)) return false;
+      if (/@[a-z0-9_.-]+/.test(normalized)) return false;
+      return line.length >= 8 && line.length <= 90;
+    });
+
+  return Array.from(new Set(lines)).slice(0, 4);
+}
+
+function inferSourceConcepts(source: ReturnType<typeof normalizeSourceMaterial>) {
+  const rawConcepts = Array.isArray(source.analysis.concepts)
+    ? source.analysis.concepts.map(String)
+    : [];
+  const concepts = [...rawConcepts, ...rankedTerms(source.text)]
+    .map(cleanDisplayText)
+    .filter((term) => validDisplayText(term) && !SOURCE_STOP_WORDS.has(normalizeForMatch(term)));
+
+  return Array.from(new Set(concepts)).slice(0, 8);
+}
+
+function inferSourceExamples(text: string) {
+  const candidates = String(text || "")
+    .split(/(?<=[.!?])\s+|\n+/u)
+    .map(cleanDisplayText)
+    .filter((sentence) => {
+      const normalized = normalizeForMatch(sentence);
+      return (
+        sentence.length >= 45 &&
+        sentence.length <= 220 &&
+        !/^pagina\s+\d+/.test(normalized) &&
+        !/@[a-z0-9_.-]+/.test(normalized)
+      );
+    });
+
+  return Array.from(new Set(candidates)).slice(0, 8);
+}
+
+function rankedTerms(text: string) {
+  const counts = new Map<string, { label: string; count: number }>();
+
+  for (const word of extractWords(text)) {
+    const key = normalizeForMatch(word);
+    if (SOURCE_STOP_WORDS.has(key) || key.length < 4) continue;
+    const current = counts.get(key);
+
+    if (current) {
+      current.count += 1;
+    } else {
+      counts.set(key, { label: word.toLowerCase(), count: 1 });
+    }
+  }
+
+  return Array.from(counts.values())
+    .sort((a, b) => b.count - a.count)
+    .map((item) => item.label)
+    .slice(0, 12);
+}
+
+function extractWords(text: string) {
+  return String(text || "").match(/[\p{L}]{4,}/gu) || [];
+}
+
+function joinTerms(terms: string[], fallback: string) {
+  const cleanTerms = terms.map(cleanDisplayText).filter(validDisplayText).slice(0, 2);
+  if (!cleanTerms.length) return fallback;
+  if (cleanTerms.length === 1) return cleanTerms[0];
+  return `${cleanTerms[0]} e ${cleanTerms[1]}`;
+}
+
+function validDisplayText(text: string) {
+  const normalized = normalizeForMatch(text);
+  if (!normalized || normalized.length < 4) return "";
+  if (/^@/.test(normalized)) return "";
+  if (/^pagina\s+\d+/.test(normalized)) return "";
+  if (/^www\.|^https?:/.test(normalized)) return "";
+  return text;
+}
+
+function cleanDisplayText(text: string) {
+  return String(text || "")
+    .replace(/https?:\/\/\S+/gi, "")
+    .replace(/@[A-Za-z0-9_.-]+/g, "")
+    .replace(/\bP[aá]gina\s+\d+\b/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function limitText(text: string, maxLength: number) {
+  const cleaned = cleanDisplayText(text);
+  return cleaned.length > maxLength ? `${cleaned.slice(0, maxLength - 1).trim()}…` : cleaned;
+}
+
+function normalizeForMatch(text: string) {
+  return String(text || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+const SOURCE_STOP_WORDS = new Set([
+  "ainda",
+  "aluna",
+  "aluno",
+  "aula",
+  "aulas",
+  "cada",
+  "como",
+  "curso",
+  "deste",
+  "desta",
+  "depois",
+  "dessa",
+  "desse",
+  "entre",
+  "essa",
+  "esse",
+  "esta",
+  "este",
+  "isso",
+  "mais",
+  "material",
+  "modulo",
+  "para",
+  "pela",
+  "pelo",
+  "pode",
+  "porque",
+  "quando",
+  "sobre",
+  "tambem",
+  "todo",
+  "todos",
+  "voce",
+  "voces",
+]);
 
 function completeReviewData(data: unknown, payload: Record<string, unknown>) {
   const record = asRecord(data);
@@ -771,7 +1082,7 @@ function getConfig(): DeepSeekConfig {
     apiKey: envValue("DEEPSEEK_API_KEY"),
     model: envValue("DEEPSEEK_MODEL") || "deepseek-v4-pro",
     baseUrl: (envValue("DEEPSEEK_BASE_URL") || "https://api.deepseek.com").replace(/\/+$/, ""),
-    timeoutMs: Math.min(Number(envValue("DEEPSEEK_TIMEOUT_MS") || 18000), 18000),
+    timeoutMs: Math.min(Number(envValue("DEEPSEEK_TIMEOUT_MS") || 20000), 20000),
   };
 }
 
@@ -832,6 +1143,17 @@ function parseJsonContent(content: string) {
   try {
     return JSON.parse(cleaned);
   } catch (error) {
+    const start = cleaned.indexOf("{");
+    const end = cleaned.lastIndexOf("}");
+
+    if (start >= 0 && end > start) {
+      try {
+        return JSON.parse(cleaned.slice(start, end + 1));
+      } catch {
+        // Continua para devolver o erro original com uma mensagem clara.
+      }
+    }
+
     throw new Error(`A IA respondeu fora do formato JSON esperado. ${cleanError(error)}`);
   }
 }

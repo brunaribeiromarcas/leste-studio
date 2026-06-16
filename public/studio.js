@@ -896,6 +896,10 @@
       throw new Error((result && result.error) || `Falha na chamada da IA. HTTP ${response.status}`);
     }
 
+    if (result.fallback && result.fallback.reason) {
+      showToast(result.fallback.reason);
+    }
+
     return result.data;
   }
 
