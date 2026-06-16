@@ -5,6 +5,9 @@
   const SERVER_UPLOAD_LIMIT_BYTES = 6 * 1024 * 1024;
   const LARGE_PDF_WARNING_BYTES = 15 * 1024 * 1024;
   const MAX_PDF_PAGES = 120;
+  const OCR_PAGE_LIMIT = 12;
+  const OCR_RENDER_SCALE = 1.75;
+  const TESSERACT_SCRIPT_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
 
@@ -12,6 +15,7 @@
   let toastTimer = null;
   let selectedSourceFile = null;
   let pdfJsModulePromise = null;
+  let tesseractLoadPromise = null;
 
   init();
 
@@ -288,6 +292,8 @@
         <dd>${escapeHtml(source.fileType || "Texto colado")}</dd>
         <dt>Tamanho</dt>
         <dd>${Number(source.charCount || source.text.length).toLocaleString("pt-BR")} caracteres</dd>
+        <dt>Leitura</dt>
+        <dd>${escapeHtml(source.extractionMethod || "texto")}</dd>
         <dt>Indícios</dt>
         <dd>${escapeHtml(formatSourceSignals(analysis))}</dd>
       </dl>
@@ -473,7 +479,11 @@
           renderMode();
           renderMatrix();
           renderMaterials();
-          showToast("PDF lido no navegador. Agora gere a matriz ou o pacote completo.");
+          showToast(
+            state.sourceMaterial.extractionMethod === "ocr"
+              ? "PDF lido por OCR. Agora gere a matriz ou o pacote completo."
+              : "PDF lido no navegador. Agora gere a matriz ou o pacote completo.",
+          );
           return;
         }
 
@@ -588,10 +598,28 @@
 
     const text = normalizeExtractedText(chunks.join("\n\n")).slice(0, SOURCE_STORE_LIMIT);
 
-    if (!text || text.length < 20) {
-      throw new Error(
-        "Este PDF parece ser escaneado ou não tem texto selecionável. Cole o conteúdo no campo de texto ou envie uma versão DOCX/PPTX.",
-      );
+    if (isWeakPdfText(text)) {
+      showToast("O PDF parece estar em imagem. Iniciando OCR; pode demorar alguns minutos.");
+      const ocrText = await extractPdfWithOcr(pdf);
+
+      if (!ocrText || isWeakPdfText(ocrText)) {
+        throw new Error(
+          "O PDF parece ser imagem ou escaneado e o OCR não conseguiu recuperar texto útil. Tente enviar uma versão DOCX/PPTX ou cole o conteúdo no campo de texto.",
+        );
+      }
+
+      return normalizeSourceMaterial({
+        fileName: file.name,
+        fileType: "pdf",
+        text: ocrText,
+        charCount: ocrText.length,
+        summary: firstSentence(ocrText) || "PDF lido por OCR e preparado para transformação pedagógica.",
+        analysis: analyzeTextLocally(ocrText),
+        extractionMethod: "ocr",
+        truncated: pdf.numPages > OCR_PAGE_LIMIT || ocrText.length >= SOURCE_STORE_LIMIT,
+        pageCount: pdf.numPages,
+        pagesRead: Math.min(pdf.numPages, OCR_PAGE_LIMIT),
+      });
     }
 
     return normalizeSourceMaterial({
@@ -601,10 +629,93 @@
       charCount: text.length,
       summary: firstSentence(text) || "PDF lido no navegador e preparado para transformação pedagógica.",
       analysis: analyzeTextLocally(text),
+      extractionMethod: "texto selecionável",
       truncated: pdf.numPages > pageLimit || text.length >= SOURCE_STORE_LIMIT,
       pageCount: pdf.numPages,
       pagesRead: pageLimit,
     });
+  }
+
+  async function extractPdfWithOcr(pdf) {
+    const Tesseract = await getTesseract();
+    const pagesToRead = Math.min(pdf.numPages, OCR_PAGE_LIMIT);
+    const chunks = [];
+    let totalChars = 0;
+    let lastProgressToast = 0;
+
+    for (let pageNumber = 1; pageNumber <= pagesToRead; pageNumber += 1) {
+      showToast(`OCR do PDF: lendo página ${pageNumber} de ${pagesToRead}.`);
+      const page = await pdf.getPage(pageNumber);
+      const viewport = page.getViewport({ scale: OCR_RENDER_SCALE });
+      const canvas = document.createElement("canvas");
+      const context = canvas.getContext("2d", { willReadFrequently: true });
+
+      canvas.width = Math.ceil(viewport.width);
+      canvas.height = Math.ceil(viewport.height);
+
+      await page.render({ canvasContext: context, viewport }).promise;
+
+      const result = await Tesseract.recognize(canvas, "por", {
+        logger: (message) => {
+          if (message.status !== "recognizing text") return;
+          const now = Date.now();
+          if (now - lastProgressToast < 3500) return;
+          lastProgressToast = now;
+          showToast(`OCR página ${pageNumber}/${pagesToRead}: ${Math.round((message.progress || 0) * 100)}%.`);
+        },
+      });
+
+      const pageText = normalizeExtractedText(result && result.data ? result.data.text : "");
+      if (pageText) {
+        chunks.push(`Página ${pageNumber}\n${pageText}`);
+        totalChars += pageText.length;
+      }
+
+      canvas.width = 1;
+      canvas.height = 1;
+
+      if (totalChars >= SOURCE_STORE_LIMIT) break;
+    }
+
+    return normalizeExtractedText(chunks.join("\n\n")).slice(0, SOURCE_STORE_LIMIT);
+  }
+
+  async function getTesseract() {
+    if (window.Tesseract && window.Tesseract.recognize) return window.Tesseract;
+
+    if (!tesseractLoadPromise) {
+      tesseractLoadPromise = new Promise((resolve, reject) => {
+        const script = document.createElement("script");
+        script.src = TESSERACT_SCRIPT_URL;
+        script.async = true;
+        script.onload = () => {
+          if (window.Tesseract && window.Tesseract.recognize) {
+            resolve(window.Tesseract);
+          } else {
+            reject(new Error("Tesseract.js carregou, mas não ficou disponível."));
+          }
+        };
+        script.onerror = () => reject(new Error("Não foi possível carregar o OCR. Verifique a conexão e tente novamente."));
+        document.head.appendChild(script);
+      });
+    }
+
+    return tesseractLoadPromise;
+  }
+
+  function isWeakPdfText(text) {
+    const normalized = normalizeExtractedText(text);
+    if (normalized.length < 450) return true;
+
+    const withoutHandles = normalized
+      .replace(/@\w[\w.-]*/g, " ")
+      .replace(/\bP[áa]gina\s+\d+\b/gi, " ")
+      .replace(/\bSlide\s+\d+\b/gi, " ");
+    const meaningfulWords = withoutHandles.match(/[A-Za-zÀ-ÿ]{4,}/g) || [];
+    const uniqueWords = new Set(meaningfulWords.map((word) => word.toLowerCase()));
+    const handleCount = (normalized.match(/@\w[\w.-]*/g) || []).length;
+
+    return uniqueWords.size < 18 || (handleCount >= 4 && uniqueWords.size < 32);
   }
 
   async function getPdfJs() {
@@ -1002,6 +1113,7 @@
       text,
       summary: String((data && data.summary) || ""),
       analysis: (data && data.analysis) || analyzeTextLocally(text),
+      extractionMethod: String((data && data.extractionMethod) || ""),
       charCount: Number((data && data.charCount) || text.length),
       extractedAt: new Date().toISOString(),
     };
