@@ -284,9 +284,14 @@
     }
 
     const analysis = source.analysis || {};
+    const weakPdf = isWeakSourceMaterial(source);
     summary.innerHTML = `
       <strong>${escapeHtml(source.fileName || "Conteúdo colado")} pronto para transformação</strong>
-      <p>${escapeHtml(source.summary || "O conteúdo será usado como base principal para gerar os materiais faltantes.")}</p>
+      <p>${escapeHtml(
+        weakPdf
+          ? "Atenção: o texto extraído parece conter só rodapé, marca d'água ou pouco conteúdo útil. Limpe o material e envie o PDF novamente para leitura por OCR, ou cole o conteúdo no campo de texto."
+          : source.summary || "O conteúdo será usado como base principal para gerar os materiais faltantes.",
+      )}</p>
       <dl>
         <dt>Origem</dt>
         <dd>${escapeHtml(source.fileType || "Texto colado")}</dd>
@@ -761,6 +766,8 @@
 
   async function generateMatrix(source) {
     await withLoading(source, async () => {
+      if (shouldBlockWeakSource()) return;
+
       try {
         const data = await callAi("matrix", {
           course: state.course,
@@ -775,6 +782,11 @@
         renderMaterials();
         showToast(hasExistingSource() ? "Matriz criada a partir do material existente." : "Matriz criada do zero com IA.");
       } catch (error) {
+        if (hasExistingSource()) {
+          showToast(`A IA não respondeu a tempo. Não gerei matriz local para evitar conteúdo incorreto. Tente novamente ou cole o texto principal do material. ${error.message}`);
+          return;
+        }
+
         state.matrix = makeLocalMatrix();
         saveState();
         renderMatrix();
@@ -785,6 +797,8 @@
 
   async function generateMaterials(source) {
     await withLoading(source, async () => {
+      if (shouldBlockWeakSource()) return;
+
       if (!hasMeaningfulMatrix()) {
         try {
           const matrix = await callAi("matrix", {
@@ -795,6 +809,10 @@
           state.matrix = normalizeMatrix(matrix);
           renderMatrix();
         } catch {
+          if (hasExistingSource()) {
+            showToast("A IA não respondeu a tempo para criar a matriz a partir do material. Não gerei fallback para evitar conteúdo incorreto.");
+            return;
+          }
           state.matrix = makeLocalMatrix();
           renderMatrix();
         }
@@ -813,6 +831,11 @@
         renderMaterials();
         showToast(hasExistingSource() ? "Pacote gerado preservando o material original." : "Pacote completo gerado do zero.");
       } catch (error) {
+        if (hasExistingSource()) {
+          showToast(`A IA não respondeu a tempo. Não gerei pacote local para evitar conteúdo incorreto. Tente novamente ou cole o texto principal do material. ${error.message}`);
+          return;
+        }
+
         state.materials = makeLocalMaterials();
         saveState();
         renderMaterials();
@@ -867,7 +890,10 @@
 
     const result = await response.json().catch(() => null);
     if (!response.ok || !result || !result.ok) {
-      throw new Error((result && result.error) || "Falha na chamada da IA.");
+      if (response.status === 504) {
+        throw new Error("Timeout da IA no Netlify. A geração demorou mais que o limite do servidor.");
+      }
+      throw new Error((result && result.error) || `Falha na chamada da IA. HTTP ${response.status}`);
     }
 
     return result.data;
@@ -1198,6 +1224,24 @@
 
   function hasExistingSource() {
     return Boolean(getSourceText());
+  }
+
+  function shouldBlockWeakSource() {
+    const source = effectiveSourceMaterial();
+    if (!isWeakSourceMaterial(source)) return false;
+
+    showToast(
+      "O PDF extraído ainda não tem conteúdo útil, só rodapé/marca d'água. Clique em Limpar material, envie o PDF novamente e aguarde o OCR; ou cole o texto principal no campo ao lado.",
+    );
+    return true;
+  }
+
+  function isWeakSourceMaterial(source) {
+    if (!source || !source.text) return false;
+    const fileType = String(source.fileType || "").toLowerCase();
+    const fileName = String(source.fileName || "").toLowerCase();
+
+    return (fileType === "pdf" || fileName.endsWith(".pdf")) && isWeakPdfText(source.text);
   }
 
   function getSourceText() {
