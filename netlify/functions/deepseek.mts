@@ -114,6 +114,18 @@ async function handleGenerate(req: Request) {
     });
   }
 
+  if (task === "materials") {
+    return jsonResponse(200, {
+      ok: true,
+      model: config.model,
+      task,
+      usage: null,
+      fallback: null,
+      elapsedMs: Date.now() - startedAt,
+      data: completeMaterials(payload),
+    });
+  }
+
   let completion: Awaited<ReturnType<typeof callDeepSeek>> | null = null;
   let data: unknown;
   let fallback: { used: boolean; reason: string } | null = null;
